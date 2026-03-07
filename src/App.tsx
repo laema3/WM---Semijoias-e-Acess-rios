@@ -1822,7 +1822,54 @@ const AdminDashboard = () => {
 
 // --- Main App ---
 
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
+  constructor(props: {children: React.ReactNode}) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-neutral-100 p-4">
+          <div className="bg-white p-8 rounded-2xl shadow-xl max-w-lg w-full">
+            <h1 className="text-2xl font-bold text-red-600 mb-4">Algo deu errado.</h1>
+            <p className="text-neutral-600 mb-4">Ocorreu um erro inesperado na aplicação.</p>
+            <pre className="bg-neutral-100 p-4 rounded-lg text-xs overflow-auto mb-6 text-red-800">
+              {this.state.error?.toString()}
+            </pre>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-black text-white font-bold py-3 rounded-xl hover:bg-neutral-800 transition-all"
+            >
+              Recarregar Página
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
+
+function AppContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [settings, setSettings] = useState<any>({});
