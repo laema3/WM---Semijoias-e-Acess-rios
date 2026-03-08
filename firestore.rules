@@ -45,9 +45,11 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow read: if true;
-      allow create: if isAdmin() && hasRequiredFields(['name', 'price', 'category_id']) &&
+      allow create: if isAdmin() && hasRequiredFields(['name', 'price']) &&
         isValidString('name', 1, 100) &&
-        isValidNumber('price');
+        isValidNumber('price') &&
+        (!('stock' in request.resource.data) || isValidNumber('stock')) &&
+        (!('cost_price' in request.resource.data) || isValidNumber('cost_price'));
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }

@@ -4,7 +4,16 @@ import { Bot, X, Send, Loader2 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+let aiClient: GoogleGenAI | null = null;
+const getAIClient = () => {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      aiClient = new GoogleGenAI({ apiKey });
+    }
+  }
+  return aiClient;
+};
 
 export default function AIAgent() {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,6 +39,11 @@ export default function AIAgent() {
     setIsLoading(true);
 
     try {
+      const ai = getAIClient();
+      if (!ai) {
+        throw new Error("API Key do Gemini não configurada.");
+      }
+
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [
@@ -47,7 +61,7 @@ export default function AIAgent() {
       setMessages(prev => [...prev, { role: 'model', text: botResponse }]);
     } catch (error) {
       console.error(error);
-      setMessages(prev => [...prev, { role: 'model', text: 'Desculpe, estou offline no momento. Tente novamente mais tarde.' }]);
+      setMessages(prev => [...prev, { role: 'model', text: 'Desculpe, estou offline no momento ou a chave da API não está configurada.' }]);
     } finally {
       setIsLoading(false);
     }

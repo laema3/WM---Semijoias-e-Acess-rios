@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
-import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, MessageSquare, Bot, Plus, Edit2, Trash2, ChevronRight, LayoutDashboard, Package, Users, Settings, LogOut, BarChart3, CreditCard, Layers, Tag, DollarSign, Wallet, Zap, Truck, Smartphone, Share2 } from 'lucide-react';
+import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, MessageSquare, Bot, Plus, Edit2, Trash2, ChevronRight, LayoutDashboard, Package, Users, Settings, LogOut, BarChart3, CreditCard, Layers, Tag, DollarSign, Wallet, Zap, Truck, Smartphone, Share2, Upload, Eye, EyeOff, Gem } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Category, Subcategory, User as UserType } from './types';
 import AIAgent from './components/AIAgent';
 import { db, auth } from './firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import Papa from 'papaparse';
 
 // --- Shared Components ---
 
@@ -179,15 +180,22 @@ const ProductCard = ({ product, onAddToCart }: { product: Product, onAddToCart: 
   return (
     <motion.div 
       whileHover={{ y: -10 }}
-      className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all border border-black/5"
+      className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all border border-black/5 flex flex-col h-full"
     >
-      <div className="relative aspect-[4/5] overflow-hidden bg-neutral-100">
-        <img 
-          src={product.image_url || 'https://picsum.photos/seed/jewelry/400/500'} 
-          alt={product.name}
-          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-          referrerPolicy="no-referrer"
-        />
+      <div className="relative aspect-[4/5] overflow-hidden bg-neutral-100 flex items-center justify-center">
+        {product.image_url ? (
+          <img 
+            src={product.image_url} 
+            alt={product.name}
+            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="text-black/20 flex flex-col items-center gap-2">
+            <ShoppingBag size={48} />
+            <span className="text-xs font-bold uppercase tracking-widest">Sem Imagem</span>
+          </div>
+        )}
         <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
           <button 
             onClick={(e) => { e.preventDefault(); onAddToCart(product); }}
@@ -202,10 +210,10 @@ const ProductCard = ({ product, onAddToCart }: { product: Product, onAddToCart: 
           </span>
         )}
       </div>
-      <div className="p-5">
-        <h3 className="text-sm font-medium text-black/60 uppercase tracking-wider mb-1">Semi Joia</h3>
-        <h2 className="text-lg font-serif font-bold mb-2">{product.name}</h2>
-        <p className="text-xl font-bold text-primary drop-shadow-sm">
+      <div className="p-5 flex-1 flex flex-col">
+        <h3 className="text-sm font-medium text-black/60 uppercase tracking-wider mb-1">{product.category || 'Semi Joia'}</h3>
+        <h2 className="text-lg font-serif font-bold mb-2 flex-1 line-clamp-2">{product.name}</h2>
+        <p className="text-xl font-bold text-primary drop-shadow-sm mt-auto">
           R$ {product.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
         </p>
       </div>
@@ -445,9 +453,16 @@ const ProductDetail = ({ products, onAddToCart }: { products: Product[], onAddTo
         <motion.div 
           initial={{ opacity: 0, x: -50 }}
           animate={{ opacity: 1, x: 0 }}
-          className="aspect-[4/5] rounded-3xl overflow-hidden shadow-2xl"
+          className="aspect-[4/5] rounded-3xl overflow-hidden shadow-2xl bg-neutral-100 flex items-center justify-center"
         >
-          <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          {product.image_url ? (
+            <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="text-black/20 flex flex-col items-center gap-4">
+              <ShoppingBag size={64} />
+              <span className="text-sm font-bold uppercase tracking-widest">Imagem Indisponível</span>
+            </div>
+          )}
         </motion.div>
         
         <motion.div 
@@ -698,6 +713,158 @@ const AdminDashboard = () => {
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
 
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importData, setImportData] = useState<any[]>([]);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 1024 * 1024) { // 1MB limit for Firestore document size
+        alert("A imagem deve ter no máximo 1MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditingProduct(prev => ({ ...prev, image_url: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const [currentProductPage, setCurrentProductPage] = useState(1);
+  const productsPerPage = 20;
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      encoding: "UTF-8", // Tenta UTF-8 primeiro
+      transformHeader: (h) => h.trim().toLowerCase(), // Normaliza os cabeçalhos para minúsculo
+      complete: (results) => {
+        setImportData(results.data);
+        setImportPreview(results.data.slice(0, 5));
+      },
+      error: (error) => {
+        console.error("Error parsing CSV:", error);
+        alert("Erro ao ler o arquivo CSV.");
+      }
+    });
+  };
+
+  const processImport = async () => {
+    if (importData.length === 0) return;
+    
+    setIsImporting(true);
+    setImportProgress(0);
+
+    try {
+      let importedCount = 0;
+      const totalItems = importData.length;
+      
+      // 1. Carregar categorias existentes para evitar duplicatas
+      const categoriesSnapshot = await getDocs(collection(db, 'categories'));
+      const categoryMap = new Map<string, string>(); // Nome -> ID
+      
+      categoriesSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.name) {
+          categoryMap.set(data.name.toLowerCase().trim(), doc.id);
+        }
+      });
+
+      // Função auxiliar para obter ou criar categoria
+      const getOrCreateCategory = async (categoryName: string): Promise<string> => {
+        const cleanName = categoryName.trim();
+        const lowerName = cleanName.toLowerCase();
+        
+        if (categoryMap.has(lowerName)) {
+          return categoryMap.get(lowerName)!;
+        }
+
+        // Cria nova categoria
+        const newCatRef = await addDoc(collection(db, 'categories'), { 
+          name: cleanName,
+          created_at: new Date().toISOString()
+        });
+        
+        categoryMap.set(lowerName, newCatRef.id);
+        return newCatRef.id;
+      };
+
+      // Mapeamento de categorias para simplificar
+      const cleanCategoryName = (grupo: string) => {
+        if (!grupo) return 'Geral';
+        // Remove caracteres estranhos e pega o último nível se tiver ">"
+        const parts = grupo.split('>');
+        return parts[parts.length - 1].trim();
+      };
+
+      for (const item of importData) {
+        // Pula linhas vazias ou sem nome
+        if (!item.nome && !item.produto) continue;
+
+        // Tratamento de Preço (R$ 1.200,50 -> 1200.50)
+        const priceStr = item.preço || item.preco || item.valor || '0';
+        const price = parseFloat(priceStr.toString().replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
+
+        // Tratamento de Custo
+        const costStr = item.custo || '0';
+        const cost = parseFloat(costStr.toString().replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
+
+        // Monta a descrição com os detalhes disponíveis
+        const details = [];
+        if (item.cor) details.push(`Cor: ${item.cor}`);
+        if (item.tamanho) details.push(`Tamanho: ${item.tamanho}`);
+        if (item.ref) details.push(`Ref: ${item.ref}`);
+        if (item.barras) details.push(`EAN: ${item.barras}`);
+        
+        const description = details.join('\n') + (item.descricao ? `\n\n${item.descricao}` : '');
+
+        // Resolve a categoria (busca ID ou cria nova)
+        const categoryName = cleanCategoryName(item.grupo || item.categoria);
+        const categoryId = await getOrCreateCategory(categoryName);
+
+        const product: any = {
+          name: item.nome || item.produto || 'Produto Sem Nome',
+          price: isNaN(price) ? 0 : price,
+          cost_price: isNaN(cost) ? 0 : cost,
+          description: description,
+          category: categoryName, // Mantém o nome para exibição legado
+          category_id: categoryId, // ID para relacionamento correto
+          images: [], 
+          featured: false,
+          best_seller: false,
+          stock: parseInt(item.quantidade || '0'),
+          supplier: item.nomefornecedor || '',
+          created_at: new Date().toISOString()
+        };
+
+        await addDoc(collection(db, 'products'), product);
+        importedCount++;
+        setImportProgress(Math.round((importedCount / totalItems) * 100));
+      }
+      
+      alert(`${importedCount} produtos importados com sucesso!`);
+      setIsImportModalOpen(false);
+      setImportData([]);
+      setImportPreview([]);
+      fetchProducts();
+      fetchCategories(); // Atualiza a lista de categorias também
+    } catch (error) {
+      console.error("Error importing products:", error);
+      alert("Erro ao importar produtos. Verifique o console para mais detalhes.");
+    } finally {
+      setIsImporting(false);
+      setImportProgress(0);
+    }
+  };
+
   const [isCatModalOpen, setIsCatModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [catToDelete, setCatToDelete] = useState<string | null>(null);
@@ -746,12 +913,14 @@ const AdminDashboard = () => {
   const fetchProducts = async () => {
     const querySnapshot = await getDocs(collection(db, 'products'));
     const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+    productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     setProducts(productsData);
   };
 
   const fetchCategories = async () => {
     const querySnapshot = await getDocs(collection(db, 'categories'));
     const categoriesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
+    categoriesData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     setCategories(categoriesData);
   };
 
@@ -767,6 +936,19 @@ const AdminDashboard = () => {
       setIsConfirmOpen(false);
       setProductToDelete(null);
       fetchProducts();
+    }
+  };
+
+  const handleToggleActive = async (product: Product) => {
+    try {
+      const newActiveStatus = (product.active === 0 || product.active === false) ? 1 : 0;
+      await updateDoc(doc(db, 'products', String(product.id)), {
+        active: newActiveStatus
+      });
+      fetchProducts();
+    } catch (error) {
+      console.error("Error toggling product status:", error);
+      alert("Erro ao alterar status do produto.");
     }
   };
 
@@ -824,7 +1006,7 @@ const AdminDashboard = () => {
       const { id, ...data } = editingProduct;
       await updateDoc(doc(db, 'products', String(id)), data);
     } else {
-      await addDoc(collection(db, 'products'), editingProduct);
+      await addDoc(collection(db, 'products'), { ...editingProduct, active: 1 });
     }
     
     setIsModalOpen(false);
@@ -1021,12 +1203,20 @@ const AdminDashboard = () => {
             <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
               <div className="p-6 border-b flex justify-between items-center">
                 <h3 className="font-bold">Lista de Produtos</h3>
-                <button 
-                  onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
-                  className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
-                >
-                  <Plus size={16} /> Adicionar
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setIsImportModalOpen(true)}
+                    className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all"
+                  >
+                    <Upload size={16} /> Importar
+                  </button>
+                  <button 
+                    onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
+                    className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                  >
+                    <Plus size={16} /> Adicionar
+                  </button>
+                </div>
               </div>
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
@@ -1038,8 +1228,8 @@ const AdminDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {products.map(product => (
-                    <tr key={product.id} className="hover:bg-neutral-50 transition-colors">
+                  {products.slice((currentProductPage - 1) * productsPerPage, currentProductPage * productsPerPage).map(product => (
+                    <tr key={product.id} className={`hover:bg-neutral-50 transition-colors ${(product.active === 0 || product.active === false) ? 'opacity-50' : ''}`}>
                       <td className="p-6">
                         <div className="flex items-center gap-4">
                           <img src={product.image_url} className="w-12 h-12 rounded-lg object-cover" referrerPolicy="no-referrer" />
@@ -1052,12 +1242,21 @@ const AdminDashboard = () => {
                       <td className="p-6 font-medium">R$ {product.price.toLocaleString('pt-BR')}</td>
                       <td className="p-6">
                         <div className="flex gap-2">
+                          {(product.active === 0 || product.active === false) && <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded">Inativo</span>}
+                          {product.active !== 0 && product.active !== false && <span className="bg-green-100 text-green-600 text-[10px] font-bold px-2 py-1 rounded">Ativo</span>}
                           {product.featured === 1 && <span className="bg-primary/20 text-black text-[10px] font-bold px-2 py-1 rounded">Destaque</span>}
                           {product.best_seller === 1 && <span className="bg-black text-white text-[10px] font-bold px-2 py-1 rounded">Best Seller</span>}
                         </div>
                       </td>
                       <td className="p-6 text-right">
                         <div className="flex justify-end gap-2">
+                          <button 
+                            onClick={() => handleToggleActive(product)}
+                            className={`p-2 rounded-lg transition-colors ${(product.active === 0 || product.active === false) ? 'hover:bg-green-50 text-green-500' : 'hover:bg-orange-50 text-orange-500'}`}
+                            title={(product.active === 0 || product.active === false) ? "Ativar Produto" : "Inativar Produto"}
+                          >
+                            {(product.active === 0 || product.active === false) ? <Eye size={18} /> : <EyeOff size={18} />}
+                          </button>
                           <button 
                             onClick={() => { setEditingProduct(product); setIsModalOpen(true); }}
                             className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
@@ -1076,6 +1275,31 @@ const AdminDashboard = () => {
                   ))}
                 </tbody>
               </table>
+              
+              {/* Pagination Controls */}
+              {products.length > productsPerPage && (
+                <div className="p-6 border-t flex items-center justify-between bg-neutral-50">
+                  <div className="text-sm text-black/60 font-medium">
+                    Mostrando {(currentProductPage - 1) * productsPerPage + 1} a {Math.min(currentProductPage * productsPerPage, products.length)} de {products.length} produtos
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setCurrentProductPage(prev => Math.max(prev - 1, 1))}
+                      disabled={currentProductPage === 1}
+                      className="px-4 py-2 rounded-xl border bg-white text-sm font-bold disabled:opacity-50 hover:bg-neutral-100 transition-colors"
+                    >
+                      Anterior
+                    </button>
+                    <button 
+                      onClick={() => setCurrentProductPage(prev => Math.min(prev + 1, Math.ceil(products.length / productsPerPage)))}
+                      disabled={currentProductPage === Math.ceil(products.length / productsPerPage)}
+                      className="px-4 py-2 rounded-xl border bg-white text-sm font-bold disabled:opacity-50 hover:bg-neutral-100 transition-colors"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1621,17 +1845,27 @@ const AdminDashboard = () => {
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-black/40">URL da Imagem</label>
-                  <input 
-                    type="text" 
-                    value={editingProduct?.image_url || ''}
-                    onChange={e => setEditingProduct({...editingProduct, image_url: e.target.value})}
-                    className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
-                  />
+                  <label className="text-xs font-bold uppercase tracking-widest text-black/40">Imagem do Produto</label>
+                  <div className="flex flex-col gap-2">
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="w-full p-3 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary text-sm" 
+                    />
+                    <div className="text-xs text-black/40 text-center">OU</div>
+                    <input 
+                      type="text" 
+                      value={editingProduct?.image_url || ''}
+                      onChange={e => setEditingProduct({...editingProduct, image_url: e.target.value})}
+                      className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
+                      placeholder="Cole a URL da imagem aqui"
+                    />
+                  </div>
                 </div>
                 {editingProduct?.image_url && (
                   <div className="col-span-2 flex justify-center p-4 bg-neutral-50 rounded-2xl">
-                    <img src={editingProduct.image_url} className="h-32 rounded-xl shadow-sm" referrerPolicy="no-referrer" />
+                    <img src={editingProduct.image_url} className="h-32 rounded-xl shadow-sm object-contain" referrerPolicy="no-referrer" />
                   </div>
                 )}
                 <div className="flex flex-col gap-2">
@@ -1816,6 +2050,101 @@ const AdminDashboard = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Import Modal */}
+      <AnimatePresence>
+        {isImportModalOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+            >
+              <div className="p-6 border-b flex justify-between items-center">
+                <h2 className="text-xl font-bold">Importar Produtos (CSV)</h2>
+                <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-neutral-100 rounded-full">
+                  <X size={24} />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto">
+                <div className="mb-6">
+                  <label className="block text-sm font-bold mb-2">Selecione o arquivo CSV</label>
+                  <input 
+                    type="file" 
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    disabled={isImporting}
+                    className="w-full p-3 border rounded-xl disabled:opacity-50"
+                  />
+                  <p className="text-xs text-neutral-500 mt-2">
+                    O arquivo deve conter colunas como: Nome, Preco, Descricao, Categoria, Imagem (URL).
+                  </p>
+                </div>
+
+                {isImporting && (
+                  <div className="mb-6">
+                    <div className="flex justify-between text-sm font-bold mb-2">
+                      <span>Importando produtos...</span>
+                      <span>{importProgress}%</span>
+                    </div>
+                    <div className="w-full bg-neutral-100 rounded-full h-2.5 overflow-hidden">
+                      <div 
+                        className="bg-black h-2.5 rounded-full transition-all duration-300" 
+                        style={{ width: `${importProgress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+
+                {importPreview.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="font-bold mb-2">Pré-visualização (5 primeiros itens)</h3>
+                    <div className="overflow-x-auto border rounded-xl">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-neutral-50">
+                          <tr>
+                            {Object.keys(importPreview[0]).map(key => (
+                              <th key={key} className="p-2 border-b font-bold">{key}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.map((row, i) => (
+                            <tr key={i} className="border-b last:border-0">
+                              {Object.values(row).map((val: any, j) => (
+                                <td key={j} className="p-2 truncate max-w-[150px]">{val}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 border-t bg-neutral-50 flex justify-end gap-3">
+                <button 
+                  onClick={() => setIsImportModalOpen(false)}
+                  disabled={isImporting}
+                  className="px-6 py-3 rounded-xl font-bold hover:bg-neutral-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={processImport}
+                  disabled={importData.length === 0 || isImporting}
+                  className="bg-black text-white px-6 py-3 rounded-xl font-bold hover:bg-neutral-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isImporting ? 'Importando...' : `Importar ${importData.length > 0 ? `(${importData.length} itens)` : ''}`}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -1869,6 +2198,144 @@ export default function App() {
   );
 }
 
+const Shop = ({ products, categories, onAddToCart, settings }: { products: Product[], categories: Category[], onAddToCart: (p: Product) => void, settings: any }) => {
+  const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
+  const [currentPage, setCurrentPage] = useState(1);
+  const productsPerPage = 12;
+
+  const filteredProducts = selectedCategory === 'Todos' 
+    ? products 
+    : products.filter(p => p.category_id === selectedCategory || (p as any).category === categories.find(c => c.id === selectedCategory)?.name);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory]);
+
+  const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
+  const currentProducts = filteredProducts.slice((currentPage - 1) * productsPerPage, currentPage * productsPerPage);
+
+  return (
+    <div className="pt-32 pb-20 px-4 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row gap-12">
+        <aside className="w-full md:w-64">
+          <h3 className="text-xl font-bold mb-6 border-b pb-2">Categorias</h3>
+          <ul className="flex flex-col gap-3">
+            <li>
+              <button 
+                onClick={() => setSelectedCategory('Todos')}
+                className={`font-bold transition-colors ${selectedCategory === 'Todos' ? 'text-primary' : 'text-black hover:text-primary'}`}
+              >
+                Todos os Produtos
+              </button>
+            </li>
+            {[...categories].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(cat => (
+              <li key={cat.id}>
+                <button 
+                  onClick={() => setSelectedCategory(String(cat.id))}
+                  className={`transition-colors text-left ${selectedCategory === String(cat.id) ? 'text-primary font-bold' : 'text-black/60 hover:text-primary'}`}
+                >
+                  {cat.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </aside>
+        <div className="flex-1">
+          <h1 className="text-4xl font-serif font-bold mb-12">Nossa Loja</h1>
+          {filteredProducts.length === 0 ? (
+            <p className="text-black/60">Nenhum produto encontrado nesta categoria.</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                {currentProducts.map(product => (
+                  <Link key={product.id} to={`/product/${product.id}`}>
+                    <ProductCard product={product} onAddToCart={onAddToCart} />
+                  </Link>
+                ))}
+              </div>
+              
+              {totalPages > 1 && (
+                <div className="mt-12 flex justify-center items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      setCurrentPage(prev => Math.max(prev - 1, 1));
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={currentPage === 1}
+                    className="px-4 py-2 rounded-xl border bg-white text-sm font-bold disabled:opacity-50 hover:bg-neutral-100 transition-colors"
+                  >
+                    Anterior
+                  </button>
+                  <div className="text-sm font-medium px-4">
+                    Página {currentPage} de {totalPages}
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setCurrentPage(prev => Math.min(prev + 1, totalPages));
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={currentPage === totalPages}
+                    className="px-4 py-2 rounded-xl border bg-white text-sm font-bold disabled:opacity-50 hover:bg-neutral-100 transition-colors"
+                  >
+                    Próxima
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const GlobalLoader = () => {
+  const [isLoading, setIsLoading] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Check if the click is on a button, a, or has an onClick
+      const isClickable = target.closest('button') || target.closest('a') || target.closest('[role="button"]');
+      
+      if (isClickable) {
+        setIsLoading(true);
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => setIsLoading(false), 1000);
+      }
+    };
+
+    document.addEventListener('click', handleClick, true);
+    return () => {
+      document.removeEventListener('click', handleClick, true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  return (
+    <AnimatePresence>
+      {isLoading && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[99999] bg-white/60 backdrop-blur-sm flex items-center justify-center pointer-events-none"
+        >
+          <div className="relative w-24 h-24 animate-[spin_1.5s_linear_infinite]">
+            {/* Ring Base */}
+            <div className="absolute inset-2 rounded-full border-[4px] border-[#D4AF37] shadow-[0_0_15px_rgba(212,175,55,0.4)]"></div>
+            {/* Diamond */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1 text-[#D4AF37] drop-shadow-[0_0_10px_rgba(212,175,55,0.8)] bg-white/50 rounded-full p-1">
+              <Gem size={28} fill="#D4AF37" fillOpacity="0.3" strokeWidth={1.5} />
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 function AppContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -1879,6 +2346,7 @@ function AppContent() {
   useEffect(() => {
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
       const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+      productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setProducts(productsData);
     }, (error) => {
       console.error("Error fetching products:", error);
@@ -1886,6 +2354,7 @@ function AppContent() {
 
     const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
       const categoriesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
+      categoriesData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setCategories(categoriesData);
     }, (error) => {
       console.error("Error fetching categories:", error);
@@ -1919,8 +2388,11 @@ function AppContent() {
     setIsCartOpen(true);
   };
 
+  const activeProducts = products.filter(p => p.active !== 0 && p.active !== false);
+
   return (
     <Router>
+      <GlobalLoader />
       <div className="min-h-screen flex flex-col">
         <Routes>
           {/* Store Routes */}
@@ -1928,7 +2400,7 @@ function AppContent() {
             <>
               <AnalyticsTracker settings={settings} />
               <Header cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)} onOpenCart={() => setIsCartOpen(true)} logoUrl={settings?.logo_url} />
-              <Home products={products} onAddToCart={addToCart} settings={settings} />
+              <Home products={activeProducts} onAddToCart={addToCart} settings={settings} />
               <Footer settings={settings} />
               <FloatingButtons />
               <InstallPrompt />
@@ -1938,33 +2410,7 @@ function AppContent() {
           <Route path="/shop" element={
             <>
               <Header cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)} onOpenCart={() => setIsCartOpen(true)} logoUrl={settings?.logo_url} />
-              <div className="pt-32 pb-20 px-4 max-w-7xl mx-auto">
-                <div className="flex flex-col md:flex-row gap-12">
-                  <aside className="w-full md:w-64">
-                    <h3 className="text-xl font-bold mb-6 border-b pb-2">Categorias</h3>
-                    <ul className="flex flex-col gap-3">
-                      <li>
-                        <button className="text-black hover:text-primary font-bold transition-colors">Todos os Produtos</button>
-                      </li>
-                      {[...categories].sort((a, b) => a.name.localeCompare(b.name)).map(cat => (
-                        <li key={cat.id}>
-                          <button className="text-black/60 hover:text-primary transition-colors">{cat.name}</button>
-                        </li>
-                      ))}
-                    </ul>
-                  </aside>
-                  <div className="flex-1">
-                    <h1 className="text-4xl font-serif font-bold mb-12">Nossa Loja</h1>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                      {products.map(product => (
-                        <Link key={product.id} to={`/product/${product.id}`}>
-                          <ProductCard product={product} onAddToCart={addToCart} />
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <Shop products={activeProducts} categories={categories} onAddToCart={addToCart} settings={settings} />
               <Footer settings={settings} />
               <FloatingButtons />
               <InstallPrompt />
@@ -1974,7 +2420,7 @@ function AppContent() {
           <Route path="/product/:id" element={
             <>
               <Header cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)} onOpenCart={() => setIsCartOpen(true)} logoUrl={settings?.logo_url} />
-              <ProductDetail products={products} onAddToCart={addToCart} />
+              <ProductDetail products={activeProducts} onAddToCart={addToCart} />
               <Footer settings={settings} />
               <FloatingButtons />
               <InstallPrompt />

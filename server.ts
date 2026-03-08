@@ -77,6 +77,13 @@ try {
   db.exec("ALTER TABLE products ADD COLUMN subcategory_id INTEGER");
 }
 
+// Simple migration for active column in products table
+try {
+  db.prepare("SELECT active FROM products LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1");
+}
+
 // Seed admin if not exists
 const adminExists = db.prepare("SELECT * FROM users WHERE role = 'admin'").get();
 if (!adminExists) {
