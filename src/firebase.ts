@@ -29,9 +29,14 @@ const finalConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(finalConfig);
+let app;
+try {
+  app = initializeApp(finalConfig);
+} catch (error) {
+  console.error("Firebase initialization error:", error);
+}
 
 // Initialize services
 // Use specific database ID if provided in config
-export const db = getFirestore(app, finalConfig.databaseId);
-export const auth = getAuth(app);
+export const db = app ? getFirestore(app, finalConfig.databaseId) : null as any;
+export const auth = app ? getAuth(app) : null as any;

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, MessageSquare, Bot, Plus, Edit2, Trash2, ChevronRight, LayoutDashboard, Package, Users, Settings, LogOut, BarChart3, CreditCard, Layers, Tag, DollarSign, Wallet, Zap, Truck, Smartphone, Share2, Upload, Eye, EyeOff, Gem } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Category, Subcategory, User as UserType } from './types';
 import AIAgent from './components/AIAgent';
 import { db, auth } from './firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot, getCountFromServer } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import Papa from 'papaparse';
 
@@ -892,13 +892,52 @@ const AdminDashboard = () => {
     fetchSubcategories();
     // fetchUsers(); // Users are managed by Firebase Auth
     // fetchOrders(); // Orders collection
-    // fetchFinancialStats(); // Calculate from orders
+    fetchFinancialStats(); // Calculate from orders
     fetchSettings();
   };
 
   const fetchFinancialStats = async () => {
-    // Calculate stats from orders collection locally or via cloud function
-    // For now, we'll just use a placeholder or calculate from fetched orders
+    try {
+      const ordersSnapshot = await getDocs(collection(db, 'orders'));
+      const ordersData = ordersSnapshot.docs.map(doc => doc.data());
+      
+      const totalRevenue = ordersData.reduce((acc, order) => acc + (order.total || 0), 0);
+      const totalOrders = ordersData.length;
+      
+      // Calculate payment method stats
+      const methodStats: any = {};
+      ordersData.forEach(order => {
+        const method = order.payment_method || 'unknown';
+        if (!methodStats[method]) {
+          methodStats[method] = { total_amount: 0, order_count: 0, payment_method: method };
+        }
+        methodStats[method].total_amount += (order.total || 0);
+        methodStats[method].order_count += 1;
+      });
+      
+      const byMethod = Object.values(methodStats);
+      
+      // Get counts for dashboard
+      const productsSnapshot = await getCountFromServer(collection(db, 'products'));
+      const customersSnapshot = await getCountFromServer(collection(db, 'users')); // Assuming users collection exists
+      
+      setFinancialStats({
+        summary: {
+          revenue: totalRevenue,
+          orders: totalOrders,
+          products: productsSnapshot.data().count,
+          customers: customersSnapshot.data().count
+        },
+        by_method: byMethod
+      });
+    } catch (error) {
+      console.error("Error fetching financial stats:", error);
+      // Fallback for empty state
+      setFinancialStats({
+        summary: { revenue: 0, orders: 0, products: 0, customers: 0 },
+        by_method: []
+      });
+    }
   };
 
   const fetchSettings = async () => {
@@ -1415,6 +1454,38 @@ const AdminDashboard = () => {
             <div className="flex flex-col gap-8">
               <div className="bg-white p-8 rounded-3xl shadow-sm">
                 <h3 className="text-xl font-bold mb-8">Controle Financeiro</h3>
+                
+                {/* Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="p-6 bg-green-50 rounded-3xl border border-green-100">
+                    <div className="text-sm font-bold text-green-600 uppercase tracking-wider mb-2">Receitas (Vendas)</div>
+                    <div className="text-3xl font-bold text-green-700">R$ {financialStats.summary.revenue.toLocaleString('pt-BR')}</div>
+                  </div>
+                  <div className="p-6 bg-red-50 rounded-3xl border border-red-100">
+                    <div className="text-sm font-bold text-red-600 uppercase tracking-wider mb-2">Despesas (Contas)</div>
+                    <div className="text-3xl font-bold text-red-700">R$ 0,00</div>
+                  </div>
+                  <div className="p-6 bg-blue-50 rounded-3xl border border-blue-100">
+                    <div className="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Saldo</div>
+                    <div className="text-3xl font-bold text-blue-700">R$ {financialStats.summary.revenue.toLocaleString('pt-BR')}</div>
+                  </div>
+                </div>
+
+                {/* Contas a Pagar Section */}
+                <div className="mb-8">
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="font-bold text-lg">Contas a Pagar</h4>
+                    <button className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-800 transition-all">
+                      <Plus size={16} /> Nova Conta
+                    </button>
+                  </div>
+                  <div className="bg-neutral-50 rounded-2xl p-8 text-center border border-neutral-100">
+                    <p className="text-black/40 font-medium">Nenhuma conta cadastrada.</p>
+                  </div>
+                </div>
+
+                {/* Payment Methods Breakdown */}
+                <h4 className="font-bold text-lg mb-4">Recebimentos por Método</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {['credit_card', 'debit_card', 'pix', 'mercado_pago', 'cash'].map(method => {
                     const data = financialStats.by_method.find((m: any) => m.payment_method === method) || { total_amount: 0, order_count: 0 };
@@ -1640,6 +1711,23 @@ const AdminDashboard = () => {
                       className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
                     />
                   </div>
+
+                  <h4 className="font-bold border-b pb-2 mt-8">Status da Loja</h4>
+                  <div className="flex items-center gap-3 mt-4">
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={settings.maintenance_mode === '1'}
+                        onChange={e => setSettings({...settings, maintenance_mode: e.target.checked ? '1' : '0'})}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                      <span className="ml-3 text-sm font-medium text-gray-900">Modo Manutenção</span>
+                    </label>
+                  </div>
+                  <p className="text-xs text-black/40 mt-1">
+                    Quando ativado, apenas administradores poderão acessar a loja. Clientes verão uma página de aviso.
+                  </p>
                 </div>
 
                 <div className="flex flex-col gap-6">
@@ -1870,31 +1958,81 @@ const AdminDashboard = () => {
                 )}
                 <div className="flex flex-col gap-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-black/40">Categoria</label>
-                  <select 
-                    value={editingProduct?.category_id || ''}
-                    onChange={e => setEditingProduct({...editingProduct, category_id: parseInt(e.target.value)})}
-                    className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <option value="">Selecionar Categoria</option>
-                    {categories.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select 
+                      value={editingProduct?.category_id || ''}
+                      onChange={e => setEditingProduct({...editingProduct, category_id: e.target.value})}
+                      className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Selecionar Categoria</option>
+                      {categories.map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      type="button"
+                      onClick={async () => {
+                        const name = window.prompt("Nome da nova categoria:");
+                        if (name) {
+                          try {
+                            const docRef = await addDoc(collection(db, 'categories'), { name, created_at: new Date().toISOString() });
+                            setCategories(prev => [...prev, { id: docRef.id, name } as Category]);
+                            setEditingProduct(prev => ({ ...prev, category_id: docRef.id }));
+                          } catch (e) {
+                            alert("Erro ao criar categoria");
+                          }
+                        }
+                      }}
+                      className="bg-black text-white px-4 rounded-xl hover:bg-primary hover:text-black transition-all"
+                      title="Adicionar Nova Categoria"
+                    >
+                      <Plus size={20} />
+                    </button>
+                  </div>
                 </div>
                 <div className="flex flex-col gap-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-black/40">Subcategoria</label>
-                  <select 
-                    value={editingProduct?.subcategory_id || ''}
-                    onChange={e => setEditingProduct({...editingProduct, subcategory_id: parseInt(e.target.value)})}
-                    className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <option value="">Selecionar Subcategoria</option>
-                    {subcategories
-                      .filter(sub => !editingProduct?.category_id || sub.category_id === editingProduct.category_id)
-                      .map(sub => (
-                        <option key={sub.id} value={sub.id}>{sub.name}</option>
-                      ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select 
+                      value={editingProduct?.subcategory_id || ''}
+                      onChange={e => setEditingProduct({...editingProduct, subcategory_id: e.target.value})}
+                      className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Selecionar Subcategoria</option>
+                      {subcategories
+                        .filter(sub => !editingProduct?.category_id || String(sub.category_id) === String(editingProduct.category_id))
+                        .map(sub => (
+                          <option key={sub.id} value={sub.id}>{sub.name}</option>
+                        ))}
+                    </select>
+                    <button 
+                      type="button"
+                      onClick={async () => {
+                        if (!editingProduct?.category_id) {
+                          alert("Selecione uma categoria primeiro.");
+                          return;
+                        }
+                        const name = window.prompt("Nome da nova subcategoria:");
+                        if (name) {
+                          try {
+                            const docRef = await addDoc(collection(db, 'subcategories'), { 
+                              name, 
+                              category_id: editingProduct.category_id,
+                              created_at: new Date().toISOString() 
+                            });
+                            setSubcategories(prev => [...prev, { id: docRef.id, name, category_id: editingProduct.category_id } as Subcategory]);
+                            setEditingProduct(prev => ({ ...prev, subcategory_id: docRef.id }));
+                          } catch (e) {
+                            alert("Erro ao criar subcategoria");
+                          }
+                        }
+                      }}
+                      className="bg-black text-white px-4 rounded-xl hover:bg-primary hover:text-black transition-all"
+                      title="Adicionar Nova Subcategoria"
+                    >
+                      <Plus size={20} />
+                    </button>
+                  </div>
                 </div>
                 <div className="col-span-2 flex flex-col gap-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-black/40">Variações (JSON - ex: {"{\"sizes\": [12, 14]}"})</label>
@@ -2019,7 +2157,7 @@ const AdminDashboard = () => {
                   <label className="text-xs font-bold uppercase tracking-widest text-black/40">Categoria Pai</label>
                   <select 
                     value={editingSubcategory?.category_id || ''}
-                    onChange={e => setEditingSubcategory({...editingSubcategory, category_id: parseInt(e.target.value)})}
+                    onChange={e => setEditingSubcategory({...editingSubcategory, category_id: e.target.value})}
                     className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary"
                     required
                   >
@@ -2336,6 +2474,44 @@ const GlobalLoader = () => {
   );
 };
 
+const MaintenancePage = ({ settings }: { settings: any }) => {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-neutral-100 p-4 text-center">
+      <div className="bg-white p-12 rounded-3xl shadow-xl max-w-lg w-full flex flex-col items-center">
+        <Link to="/admin/login" className="w-20 h-20 bg-yellow-50 text-yellow-500 rounded-full flex items-center justify-center mb-6 hover:bg-yellow-100 transition-colors">
+          <Settings size={40} />
+        </Link>
+        <h1 className="text-3xl font-bold mb-4">Em Manutenção</h1>
+        <p className="text-neutral-600 mb-8">
+          Estamos realizando algumas melhorias em nossa loja. Voltaremos em breve!
+        </p>
+        {settings?.footer_whatsapp && (
+          <a 
+            href={`https://wa.me/${settings.footer_whatsapp.replace(/\D/g, '')}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-green-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-600 transition-all flex items-center gap-2"
+          >
+            <MessageSquare size={20} />
+            Fale Conosco no WhatsApp
+          </a>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const MaintenanceCheck = ({ settings, children }: { settings: any, children: React.ReactNode }) => {
+  const location = useLocation();
+  const isAdmin = location.pathname.startsWith('/admin');
+
+  if (settings?.maintenance_mode === '1' && !isAdmin) {
+    return <MaintenancePage settings={settings} />;
+  }
+
+  return <>{children}</>;
+};
+
 function AppContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -2344,6 +2520,8 @@ function AppContent() {
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   useEffect(() => {
+    if (!db) return;
+
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
       const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
       productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -2393,8 +2571,9 @@ function AppContent() {
   return (
     <Router>
       <GlobalLoader />
-      <div className="min-h-screen flex flex-col">
-        <Routes>
+      <MaintenanceCheck settings={settings}>
+        <div className="min-h-screen flex flex-col">
+          <Routes>
           {/* Store Routes */}
           <Route path="/" element={
             <>
@@ -2508,6 +2687,7 @@ function AppContent() {
           )}
         </AnimatePresence>
       </div>
+      </MaintenanceCheck>
     </Router>
   );
 }
