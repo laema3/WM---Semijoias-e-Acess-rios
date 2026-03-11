@@ -10,6 +10,7 @@ export interface Product {
   best_seller: boolean | number;
   variations: any; // Can be string (from DB) or object (parsed)
   active?: boolean | number;
+  code?: string;
 }
 
 export interface Category {

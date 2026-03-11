@@ -1449,6 +1449,7 @@ const AdminDashboard = () => {
                 <thead className="bg-neutral-50 border-b">
                   <tr>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Produto</th>
+                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Código</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Preço</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Status</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40 text-right">Ações</th>
@@ -1466,6 +1467,7 @@ const AdminDashboard = () => {
                           </div>
                         </div>
                       </td>
+                      <td className="p-6 text-black/60">{product.code || '-'}</td>
                       <td className="p-6 font-medium">R$ {product.price.toLocaleString('pt-BR')}</td>
                       <td className="p-6">
                         <div className="flex gap-2">
@@ -2170,6 +2172,15 @@ const AdminDashboard = () => {
                     onChange={e => setEditingProduct({...editingProduct, name: e.target.value})}
                     className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
                     required 
+                  />
+                </div>
+                <div className="col-span-2 flex flex-col gap-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-black/40">Código do Produto</label>
+                  <input 
+                    type="text" 
+                    value={editingProduct?.code || ''}
+                    onChange={e => setEditingProduct({...editingProduct, code: e.target.value})}
+                    className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
                   />
                 </div>
                 <div className="flex flex-col gap-2">
