@@ -4,10 +4,63 @@ import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, Message
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Category, Subcategory, User as UserType } from './types';
 import AIAgent from './components/AIAgent';
-import { db, auth } from './firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot, getCountFromServer } from 'firebase/firestore';
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { db, auth, finalConfig } from './firebase';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot, getCountFromServer, getDocFromServer } from 'firebase/firestore';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from 'firebase/auth';
 import Papa from 'papaparse';
+
+// --- Error Handling ---
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // We don't throw here to avoid crashing the whole app, but we log it clearly
+}
 
 // --- Shared Components ---
 
@@ -621,9 +674,11 @@ const AdminLogin = () => {
   const navigate = useNavigate();
 
   const [isRegistering, setIsRegistering] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     try {
       if (isRegistering) {
         const userCredential = await import('firebase/auth').then(module => 
@@ -633,19 +688,40 @@ const AdminLogin = () => {
         // Create user profile in Firestore
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           email: email,
-          role: 'admin',
-          name: 'Admin',
+          role: email === 'camillasites@gmail.com' ? 'admin' : 'viewer',
+          name: email.split('@')[0],
           created_at: new Date().toISOString()
         });
 
-        alert('Conta criada! Você já está logado.');
+        alert('Conta criada! Você já está logado. Peça ao administrador para liberar seu acesso.');
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
       navigate('/admin/dashboard');
     } catch (err: any) {
-      setError(err.message || 'Erro ao autenticar.');
+      if (err.code === 'auth/email-already-in-use') {
+        setError('Este e-mail já está cadastrado. Tente fazer login ou redefina sua senha.');
+      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        setError('E-mail ou senha incorretos.');
+      } else {
+        setError(err.message || 'Erro ao autenticar.');
+      }
       console.error(err);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email) {
+      setError('Por favor, digite seu e-mail acima para redefinir a senha.');
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setResetSent(true);
+      setError('');
+      alert('E-mail de redefinição de senha enviado! Verifique sua caixa de entrada.');
+    } catch (err: any) {
+      setError(err.message || 'Erro ao enviar e-mail de redefinição.');
     }
   };
 
@@ -658,7 +734,7 @@ const AdminLogin = () => {
       >
         <div className="bg-primary p-10 text-center">
           <h2 className="text-3xl font-serif font-bold mb-2">Painel Admin</h2>
-          <p className="text-black/60">{isRegistering ? 'Criar nova conta admin' : 'Acesso restrito para administradores'}</p>
+          <p className="text-black/60">{isRegistering ? 'Criar conta de acesso' : 'Acesso restrito para equipe'}</p>
         </div>
         <form onSubmit={handleLogin} className="p-10 flex flex-col gap-6">
           {error && <div className="bg-red-50 text-red-500 p-4 rounded-xl text-sm font-medium">{error}</div>}
@@ -681,16 +757,33 @@ const AdminLogin = () => {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••" 
               className="w-full p-4 bg-neutral-100 rounded-xl focus:ring-2 focus:ring-primary outline-none" 
-              required
+              required={!resetSent}
             />
           </div>
           <button type="submit" className="w-full bg-black text-white font-bold py-4 rounded-xl hover:bg-primary hover:text-black transition-all mt-4">
             {isRegistering ? 'CRIAR CONTA' : 'ENTRAR NO PAINEL'}
           </button>
-          <button type="button" onClick={() => setIsRegistering(!isRegistering)} className="text-center text-sm text-black/60 hover:text-black">
-            {isRegistering ? 'Já tem conta? Entrar' : 'Não tem conta? Criar'}
-          </button>
-          <Link to="/" className="text-center text-sm text-black/40 hover:text-black">Voltar para a loja</Link>
+          
+          <div className="flex flex-col gap-4 text-center mt-4 border-t pt-6">
+            <button 
+              type="button" 
+              onClick={() => { setIsRegistering(!isRegistering); setError(''); setResetSent(false); }}
+              className="text-sm font-bold text-black/60 hover:text-black transition-colors"
+            >
+              {isRegistering ? 'Já tem conta? Entrar' : 'Não tem conta? Criar'}
+            </button>
+            
+            {!isRegistering && (
+              <button 
+                type="button" 
+                onClick={handleResetPassword}
+                className="text-sm font-medium text-primary hover:text-black transition-colors"
+              >
+                Esqueci minha senha
+              </button>
+            )}
+          </div>
+          <Link to="/" className="text-center text-sm text-black/40 hover:text-black mt-2">Voltar para a loja</Link>
         </form>
       </motion.div>
     </div>
@@ -873,13 +966,32 @@ const AdminDashboard = () => {
   const [editingSubcategory, setEditingSubcategory] = useState<any>(null);
   const [subToDelete, setSubToDelete] = useState<string | null>(null);
 
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
+
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
+
   const navigate = useNavigate();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         navigate('/admin/login');
       } else {
+        if (user.email === 'camillasites@gmail.com') {
+          setCurrentUserRole('admin');
+        } else {
+          try {
+            const userDoc = await getDocFromServer(doc(db, 'users', user.uid));
+            if (userDoc.exists()) {
+              setCurrentUserRole(userDoc.data().role as any);
+            } else {
+              setCurrentUserRole('viewer');
+            }
+          } catch (e) {
+            setCurrentUserRole('viewer');
+          }
+        }
         fetchAll();
       }
     });
@@ -890,10 +1002,20 @@ const AdminDashboard = () => {
     fetchProducts();
     fetchCategories();
     fetchSubcategories();
-    // fetchUsers(); // Users are managed by Firebase Auth
+    fetchUsers();
     // fetchOrders(); // Orders collection
     fetchFinancialStats(); // Calculate from orders
     fetchSettings();
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'users'));
+      const usersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as UserType[];
+      setUsers(usersData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'users');
+    }
   };
 
   const fetchFinancialStats = async () => {
@@ -950,23 +1072,35 @@ const AdminDashboard = () => {
   };
 
   const fetchProducts = async () => {
-    const querySnapshot = await getDocs(collection(db, 'products'));
-    const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
-    productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    setProducts(productsData);
+    try {
+      const querySnapshot = await getDocs(collection(db, 'products'));
+      const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+      productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setProducts(productsData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'products');
+    }
   };
 
   const fetchCategories = async () => {
-    const querySnapshot = await getDocs(collection(db, 'categories'));
-    const categoriesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
-    categoriesData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    setCategories(categoriesData);
+    try {
+      const querySnapshot = await getDocs(collection(db, 'categories'));
+      const categoriesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
+      categoriesData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setCategories(categoriesData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'categories');
+    }
   };
 
   const fetchSubcategories = async () => {
-    const querySnapshot = await getDocs(collection(db, 'subcategories'));
-    const subcategoriesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Subcategory[];
-    setSubcategories(subcategoriesData);
+    try {
+      const querySnapshot = await getDocs(collection(db, 'subcategories'));
+      const subcategoriesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Subcategory[];
+      setSubcategories(subcategoriesData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'subcategories');
+    }
   };
 
   const handleDelete = async () => {
@@ -1031,6 +1165,48 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleSaveUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editingUser.id) {
+        await updateDoc(doc(db, 'users', editingUser.id), {
+          name: editingUser.name,
+          role: editingUser.role
+        });
+      } else {
+        const { initializeApp } = await import('firebase/app');
+        const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
+        
+        const secondaryApp = initializeApp(finalConfig, "Secondary");
+        const secondaryAuth = getAuth(secondaryApp);
+        
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, editingUser.email, editingUser.password);
+        
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          email: editingUser.email,
+          role: editingUser.role,
+          name: editingUser.name,
+          created_at: new Date().toISOString()
+        });
+        
+        await signOut(secondaryAuth);
+      }
+      setIsUserModalOpen(false);
+      fetchUsers();
+    } catch (error: any) {
+      alert('Erro ao salvar usuário: ' + error.message);
+    }
+  };
+
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { role: newRole });
+      fetchUsers();
+    } catch (error) {
+      alert('Erro ao atualizar permissão. Apenas administradores podem fazer isso.');
+    }
+  };
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     for (const [key, value] of Object.entries(settings)) {
@@ -1085,24 +1261,28 @@ const AdminDashboard = () => {
           >
             <Layers size={20} /> Subcategorias
           </button>
-          <button 
-            onClick={() => setActiveTab('clients')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'clients' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
-          >
-            <Users size={20} /> Clientes
-          </button>
+          {currentUserRole === 'admin' && (
+            <button 
+              onClick={() => setActiveTab('clients')}
+              className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'clients' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
+            >
+              <Users size={20} /> Equipe e Usuários
+            </button>
+          )}
           <button 
             onClick={() => setActiveTab('orders')}
             className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'orders' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
           >
             <ShoppingBag size={20} /> Pedidos
           </button>
-          <button 
-            onClick={() => setActiveTab('financial')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'financial' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
-          >
-            <DollarSign size={20} /> Financeiro
-          </button>
+          {currentUserRole === 'admin' && (
+            <button 
+              onClick={() => setActiveTab('financial')}
+              className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'financial' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
+            >
+              <DollarSign size={20} /> Financeiro
+            </button>
+          )}
           <button 
             onClick={() => setActiveTab('payments')}
             className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'payments' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
@@ -1115,18 +1295,22 @@ const AdminDashboard = () => {
           >
             <Truck size={20} /> Frete
           </button>
-          <button 
-            onClick={() => setActiveTab('general_config')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'general_config' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
-          >
-            <Settings size={20} /> Geral
-          </button>
-          <button 
-            onClick={() => setActiveTab('marketing_config')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'marketing_config' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
-          >
-            <Share2 size={20} /> Marketing
-          </button>
+          {currentUserRole === 'admin' && (
+            <button 
+              onClick={() => setActiveTab('general_config')}
+              className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'general_config' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
+            >
+              <Settings size={20} /> Geral
+            </button>
+          )}
+          {currentUserRole === 'admin' && (
+            <button 
+              onClick={() => setActiveTab('marketing_config')}
+              className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'marketing_config' ? 'bg-primary text-black font-bold' : 'hover:bg-white/5 text-white/60'}`}
+            >
+              <Share2 size={20} /> Marketing
+            </button>
+          )}
         </nav>
         <div className="p-4 border-t border-white/10">
           <button 
@@ -1141,13 +1325,15 @@ const AdminDashboard = () => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
         <header className="bg-white p-6 shadow-sm flex items-center justify-between">
-          <h2 className="text-2xl font-bold capitalize">{activeTab}</h2>
-          <button 
-            onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
-            className="bg-black text-white px-6 py-2 rounded-lg flex items-center gap-2 hover:bg-primary hover:text-black transition-all font-bold"
-          >
-            <Plus size={20} /> Novo Produto
-          </button>
+          <h2 className="text-2xl font-bold capitalize">{activeTab === 'clients' ? 'Equipe e Usuários' : activeTab}</h2>
+          {currentUserRole !== 'viewer' && activeTab === 'products' && (
+            <button 
+              onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
+              className="bg-black text-white px-6 py-2 rounded-lg flex items-center gap-2 hover:bg-primary hover:text-black transition-all font-bold"
+            >
+              <Plus size={20} /> Novo Produto
+            </button>
+          )}
         </header>
 
         <main className="p-8 overflow-y-auto max-h-[calc(100vh-80px)]">
@@ -1242,20 +1428,22 @@ const AdminDashboard = () => {
             <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
               <div className="p-6 border-b flex justify-between items-center">
                 <h3 className="font-bold">Lista de Produtos</h3>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => setIsImportModalOpen(true)}
-                    className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all"
-                  >
-                    <Upload size={16} /> Importar
-                  </button>
-                  <button 
-                    onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
-                    className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
-                  >
-                    <Plus size={16} /> Adicionar
-                  </button>
-                </div>
+                {currentUserRole !== 'viewer' && (
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setIsImportModalOpen(true)}
+                      className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all"
+                    >
+                      <Upload size={16} /> Importar
+                    </button>
+                    <button 
+                      onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
+                      className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                    >
+                      <Plus size={16} /> Adicionar
+                    </button>
+                  </div>
+                )}
               </div>
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
@@ -1289,25 +1477,31 @@ const AdminDashboard = () => {
                       </td>
                       <td className="p-6 text-right">
                         <div className="flex justify-end gap-2">
-                          <button 
-                            onClick={() => handleToggleActive(product)}
-                            className={`p-2 rounded-lg transition-colors ${(product.active === 0 || product.active === false) ? 'hover:bg-green-50 text-green-500' : 'hover:bg-orange-50 text-orange-500'}`}
-                            title={(product.active === 0 || product.active === false) ? "Ativar Produto" : "Inativar Produto"}
-                          >
-                            {(product.active === 0 || product.active === false) ? <Eye size={18} /> : <EyeOff size={18} />}
-                          </button>
-                          <button 
-                            onClick={() => { setEditingProduct(product); setIsModalOpen(true); }}
-                            className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
-                          >
-                            <Edit2 size={18} />
-                          </button>
-                          <button 
-                            onClick={() => { setProductToDelete(product.id); setIsConfirmOpen(true); }}
-                            className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                          {currentUserRole !== 'viewer' && (
+                            <>
+                              <button 
+                                onClick={() => handleToggleActive(product)}
+                                className={`p-2 rounded-lg transition-colors ${(product.active === 0 || product.active === false) ? 'hover:bg-green-50 text-green-500' : 'hover:bg-orange-50 text-orange-500'}`}
+                                title={(product.active === 0 || product.active === false) ? "Ativar Produto" : "Inativar Produto"}
+                              >
+                                {(product.active === 0 || product.active === false) ? <Eye size={18} /> : <EyeOff size={18} />}
+                              </button>
+                              <button 
+                                onClick={() => { setEditingProduct(product); setIsModalOpen(true); }}
+                                className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
+                              >
+                                <Edit2 size={18} />
+                              </button>
+                            </>
+                          )}
+                          {currentUserRole === 'admin' && (
+                            <button 
+                              onClick={() => { setProductToDelete(product.id); setIsConfirmOpen(true); }}
+                              className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1346,12 +1540,14 @@ const AdminDashboard = () => {
             <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
               <div className="p-6 border-b flex justify-between items-center">
                 <h3 className="font-bold">Categorias</h3>
-                <button 
-                  onClick={() => { setEditingCategory({}); setIsCatModalOpen(true); }}
-                  className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
-                >
-                  <Plus size={16} /> Nova Categoria
-                </button>
+                {currentUserRole !== 'viewer' && (
+                  <button 
+                    onClick={() => { setEditingCategory({}); setIsCatModalOpen(true); }}
+                    className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                  >
+                    <Plus size={16} /> Nova Categoria
+                  </button>
+                )}
               </div>
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
@@ -1368,23 +1564,27 @@ const AdminDashboard = () => {
                       <td className="p-6 font-bold">{cat.name}</td>
                       <td className="p-6 text-right">
                         <div className="flex justify-end gap-2">
-                          <button 
-                            onClick={() => { setEditingCategory(cat); setIsCatModalOpen(true); }}
-                            className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
-                          >
-                            <Edit2 size={18} />
-                          </button>
-                          <button 
-                            onClick={() => {
-                              if (window.confirm('Excluir esta categoria?')) {
-                                setCatToDelete(cat.id);
-                                handleDeleteCategory();
-                              }
-                            }}
-                            className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                          {currentUserRole !== 'viewer' && (
+                            <button 
+                              onClick={() => { setEditingCategory(cat); setIsCatModalOpen(true); }}
+                              className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                          )}
+                          {currentUserRole === 'admin' && (
+                            <button 
+                              onClick={() => {
+                                if (window.confirm('Excluir esta categoria?')) {
+                                  setCatToDelete(cat.id);
+                                  handleDeleteCategory();
+                                }
+                              }}
+                              className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1398,12 +1598,14 @@ const AdminDashboard = () => {
             <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
               <div className="p-6 border-b flex justify-between items-center">
                 <h3 className="font-bold">Subcategorias</h3>
-                <button 
-                  onClick={() => { setEditingSubcategory({}); setIsSubModalOpen(true); }}
-                  className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
-                >
-                  <Plus size={16} /> Nova Subcategoria
-                </button>
+                {currentUserRole !== 'viewer' && (
+                  <button 
+                    onClick={() => { setEditingSubcategory({}); setIsSubModalOpen(true); }}
+                    className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                  >
+                    <Plus size={16} /> Nova Subcategoria
+                  </button>
+                )}
               </div>
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
@@ -1424,23 +1626,27 @@ const AdminDashboard = () => {
                       </td>
                       <td className="p-6 text-right">
                         <div className="flex justify-end gap-2">
-                          <button 
-                            onClick={() => { setEditingSubcategory(sub); setIsSubModalOpen(true); }}
-                            className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
-                          >
-                            <Edit2 size={18} />
-                          </button>
-                          <button 
-                            onClick={() => {
-                              if (window.confirm('Excluir esta subcategoria?')) {
-                                setSubToDelete(sub.id);
-                                handleDeleteSubcategory();
-                              }
-                            }}
-                            className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                          {currentUserRole !== 'viewer' && (
+                            <button 
+                              onClick={() => { setEditingSubcategory(sub); setIsSubModalOpen(true); }}
+                              className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                          )}
+                          {currentUserRole === 'admin' && (
+                            <button 
+                              onClick={() => {
+                                if (window.confirm('Excluir esta subcategoria?')) {
+                                  setSubToDelete(sub.id);
+                                  handleDeleteSubcategory();
+                                }
+                              }}
+                              className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1778,13 +1984,23 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {activeTab === 'clients' && (
+          {activeTab === 'clients' && currentUserRole === 'admin' && (
             <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
+              <div className="p-6 border-b flex justify-between items-center">
+                <h3 className="font-bold">Equipe e Usuários</h3>
+                <button 
+                  onClick={() => { setEditingUser({ role: 'viewer' }); setIsUserModalOpen(true); }}
+                  className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                >
+                  <Plus size={16} /> Novo Usuário
+                </button>
+              </div>
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
                   <tr>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Cliente</th>
+                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Usuário</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">E-mail</th>
+                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Nível de Acesso</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40 text-right">Ações</th>
                   </tr>
                 </thead>
@@ -1794,16 +2010,51 @@ const AdminDashboard = () => {
                       <td className="p-6">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center text-primary font-bold">
-                            {user.name.charAt(0)}
+                            {user.name?.charAt(0) || '@'}
                           </div>
                           <div className="font-bold">{user.name}</div>
                         </div>
                       </td>
                       <td className="p-6 text-black/60">{user.email}</td>
+                      <td className="p-6">
+                        <select
+                          value={user.role || 'viewer'}
+                          onChange={(e) => handleRoleChange(String(user.id), e.target.value)}
+                          disabled={user.email === 'camillasites@gmail.com' || currentUserRole !== 'admin'}
+                          className="p-2 bg-neutral-100 rounded-lg outline-none text-sm font-medium"
+                        >
+                          <option value="admin">Administrador (Total)</option>
+                          <option value="editor">Editor (Lançamentos)</option>
+                          <option value="viewer">Visualizador / Cliente</option>
+                        </select>
+                      </td>
                       <td className="p-6 text-right">
-                        <button className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors">
-                          <Edit2 size={18} />
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button 
+                            onClick={() => { setEditingUser(user); setIsUserModalOpen(true); }}
+                            className="p-2 hover:bg-primary/20 text-black rounded-lg transition-colors"
+                            disabled={user.email === 'camillasites@gmail.com'}
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          {currentUserRole === 'admin' && user.email !== 'camillasites@gmail.com' && (
+                            <button 
+                              onClick={async () => {
+                                if (window.confirm('Excluir este usuário? O acesso dele será revogado.')) {
+                                  try {
+                                    await deleteDoc(doc(db, 'users', String(user.id)));
+                                    fetchUsers();
+                                  } catch (error) {
+                                    alert('Erro ao excluir usuário. Apenas administradores podem fazer isso.');
+                                  }
+                                }
+                              }}
+                              className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2189,6 +2440,87 @@ const AdminDashboard = () => {
         )}
       </AnimatePresence>
 
+      {/* User Modal */}
+      <AnimatePresence>
+        {isUserModalOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsUserModalOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-8 border-b flex items-center justify-between bg-neutral-50">
+                <h3 className="text-xl font-bold">{editingUser?.id ? 'Editar Usuário' : 'Novo Usuário'}</h3>
+                <button onClick={() => setIsUserModalOpen(false)}><X size={24} /></button>
+              </div>
+              <form onSubmit={handleSaveUser} className="p-8 flex flex-col gap-6">
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-black/40">Nome</label>
+                  <input 
+                    type="text" 
+                    value={editingUser?.name || ''}
+                    onChange={e => setEditingUser({...editingUser, name: e.target.value})}
+                    className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
+                    required 
+                  />
+                </div>
+                {!editingUser?.id && (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-black/40">E-mail</label>
+                      <input 
+                        type="email" 
+                        value={editingUser?.email || ''}
+                        onChange={e => setEditingUser({...editingUser, email: e.target.value})}
+                        className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
+                        required 
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-black/40">Senha</label>
+                      <input 
+                        type="password" 
+                        value={editingUser?.password || ''}
+                        onChange={e => setEditingUser({...editingUser, password: e.target.value})}
+                        className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
+                        required 
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-black/40">Nível de Acesso</label>
+                  <select 
+                    value={editingUser?.role || 'viewer'}
+                    onChange={e => setEditingUser({...editingUser, role: e.target.value})}
+                    className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary"
+                    required
+                  >
+                    <option value="admin">Administrador (Total)</option>
+                    <option value="editor">Editor (Lançamentos)</option>
+                    <option value="viewer">Visualizador / Cliente</option>
+                  </select>
+                </div>
+                <div className="pt-6 border-t flex justify-end gap-4">
+                  <button type="button" onClick={() => setIsUserModalOpen(false)} className="px-8 py-3 font-bold text-black/40 hover:text-black">Cancelar</button>
+                  <button type="submit" className="bg-black text-white px-10 py-3 rounded-xl font-bold hover:bg-primary hover:text-black transition-all">
+                    SALVAR
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Import Modal */}
       <AnimatePresence>
         {isImportModalOpen && (
@@ -2522,12 +2854,24 @@ function AppContent() {
   useEffect(() => {
     if (!db) return;
 
+    // Connection Test
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. The client is offline.");
+        }
+      }
+    };
+    testConnection();
+
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
       const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
       productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setProducts(productsData);
     }, (error) => {
-      console.error("Error fetching products:", error);
+      handleFirestoreError(error, OperationType.GET, 'products');
     });
 
     const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
@@ -2535,7 +2879,7 @@ function AppContent() {
       categoriesData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setCategories(categoriesData);
     }, (error) => {
-      console.error("Error fetching categories:", error);
+      handleFirestoreError(error, OperationType.GET, 'categories');
     });
 
     const unsubSettings = onSnapshot(collection(db, 'settings'), (snapshot) => {
@@ -2545,7 +2889,7 @@ function AppContent() {
       });
       setSettings(settingsData);
     }, (error) => {
-      console.error("Error fetching settings:", error);
+      handleFirestoreError(error, OperationType.GET, 'settings');
     });
 
     return () => {

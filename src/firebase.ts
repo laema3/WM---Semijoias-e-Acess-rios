@@ -17,7 +17,7 @@ const firebaseConfig = {
 
 // Fallback for local development if env vars are missing (using the JSON file content directly)
 // This ensures it works in the preview environment without needing .env setup
-const finalConfig = {
+export const finalConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAOBG5I0FZB4tNbvS5pG4UVeOHI1fMbJrM",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "gen-lang-client-0623147734.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0623147734",

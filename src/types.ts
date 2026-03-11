@@ -26,7 +26,7 @@ export interface Subcategory {
 export interface User {
   id: string | number;
   email: string;
-  role: 'admin' | 'customer';
+  role: 'admin' | 'editor' | 'customer' | 'viewer';
   name: string;
 }
 

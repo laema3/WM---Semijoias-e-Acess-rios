@@ -21,6 +21,11 @@ service cloud.firestore {
           request.auth.token.email == "camillasites@gmail.com");
     }
 
+    function isEditor() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
+    }
+
     function hasRequiredFields(fields) {
       return request.resource.data.keys().hasAll(fields);
     }
@@ -45,26 +50,26 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow read: if true;
-      allow create: if isAdmin() && hasRequiredFields(['name', 'price']) &&
+      allow create: if (isAdmin() || isEditor()) && hasRequiredFields(['name', 'price']) &&
         isValidString('name', 1, 100) &&
         isValidNumber('price') &&
         (!('stock' in request.resource.data) || isValidNumber('stock')) &&
         (!('cost_price' in request.resource.data) || isValidNumber('cost_price'));
-      allow update: if isAdmin();
+      allow update: if isAdmin() || isEditor();
       allow delete: if isAdmin();
     }
 
     match /categories/{categoryId} {
       allow read: if true;
-      allow create: if isAdmin() && hasRequiredFields(['name']) && isValidString('name', 1, 50);
-      allow update: if isAdmin();
+      allow create: if (isAdmin() || isEditor()) && hasRequiredFields(['name']) && isValidString('name', 1, 50);
+      allow update: if isAdmin() || isEditor();
       allow delete: if isAdmin();
     }
 
     match /subcategories/{subcategoryId} {
       allow read: if true;
-      allow create: if isAdmin() && hasRequiredFields(['name', 'category_id']) && isValidString('name', 1, 50);
-      allow update: if isAdmin();
+      allow create: if (isAdmin() || isEditor()) && hasRequiredFields(['name', 'category_id']) && isValidString('name', 1, 50);
+      allow update: if isAdmin() || isEditor();
       allow delete: if isAdmin();
     }
 
@@ -77,8 +82,15 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && isOwner(userId); // Users can create their own profile
-      allow update: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && (isAdmin() || (isOwner(userId) && request.resource.data.role in ['viewer', 'customer']));
+      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAdmin() || isEditor() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if true;
+      allow update: if isAdmin() || isEditor();
       allow delete: if isAdmin();
     }
   }
