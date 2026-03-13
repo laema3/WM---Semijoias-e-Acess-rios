@@ -4,7 +4,7 @@ import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, Message
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Category, Subcategory, User as UserType } from './types';
 import AIAgent from './components/AIAgent';
-import { db, auth, storage, finalConfig, checkConnection } from './firebase';
+import { db, auth, storage, checkConnection } from './firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot, getCountFromServer, getDocFromServer, writeBatch } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from 'firebase/auth';
@@ -830,6 +830,36 @@ const AdminDashboard = () => {
     }
   };
 
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+
+  const resetDatabase = async () => {
+    setIsResetConfirmOpen(false);
+    setIsImporting(true);
+    setCurrentImportingProduct('Limpando banco de dados...');
+    
+    try {
+      const collectionsToClear = ['products', 'categories'];
+      for (const colName of collectionsToClear) {
+        const snapshot = await getDocs(collection(db, colName));
+        const docs = snapshot.docs;
+        
+        for (let i = 0; i < docs.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = docs.slice(i, i + 500);
+          chunk.forEach(doc => batch.delete(doc.ref));
+          await batch.commit();
+        }
+      }
+      alert("Banco de dados limpo com sucesso!");
+    } catch (error) {
+      console.error("Erro ao limpar banco:", error);
+      alert("Erro ao limpar o banco de dados.");
+    } finally {
+      setIsImporting(false);
+      setCurrentImportingProduct('');
+    }
+  };
+
   const [currentProductPage, setCurrentProductPage] = useState(1);
   const productsPerPage = 20;
 
@@ -840,8 +870,9 @@ const AdminDashboard = () => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      encoding: "UTF-8", // Tenta UTF-8 primeiro
-      transformHeader: (h) => h.trim().toLowerCase(), // Normaliza os cabeçalhos para minúsculo
+      encoding: "UTF-8",
+      delimiter: ";", // Explicitly set semicolon delimiter
+      transformHeader: (h) => h.trim().toLowerCase(),
       complete: (results) => {
         console.log("CSV parsed successfully. Items:", results.data.length);
         setImportData(results.data);
@@ -918,7 +949,7 @@ const AdminDashboard = () => {
         const costStr = item.custo || '0';
         const cost = parseFloat(costStr.toString().replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
 
-        const productCode = (item.código || item.codigo || item.code || '').toString().trim();
+        const productCode = (item.barras || item.código || item.codigo || item.code || '').toString().trim();
         const productName = item.nome || item.produto || 'Produto Sem Nome';
         const categoryName = cleanCategoryName(item.grupo || item.categoria);
         const categoryId = getOrCreateCategory(categoryName);
@@ -979,6 +1010,7 @@ const AdminDashboard = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setIsImportModalOpen(true);
     setIsImporting(true);
     setCurrentImportingProduct('Descompactando ZIP...');
     setImportProgress(0);
@@ -990,17 +1022,22 @@ const AdminDashboard = () => {
       let processedFiles = 0;
 
       for (const filename of files) {
+        console.log(`Processing file: ${filename}`);
         const fileData = await zip.files[filename].async('blob');
         const storageRef = ref(storage, `products/${filename}`);
         
+        console.log(`Uploading: ${filename}`);
         await uploadBytes(storageRef, fileData);
         const downloadURL = await getDownloadURL(storageRef);
+        console.log(`Uploaded: ${filename}, URL: ${downloadURL}`);
 
         // Tenta encontrar o produto pelo nome do arquivo (sem extensão)
         const productName = filename.split('.')[0];
-        const product = products.find(p => p.name.toLowerCase() === productName.toLowerCase() || p.code === productName);
+        const paddedName = productName.padStart(6, '0');
+        const product = products.find(p => p.name.toLowerCase() === productName.toLowerCase() || p.code === productName || p.code === paddedName);
 
         if (product) {
+          console.log(`Updating product: ${product.id}`);
           await updateDoc(doc(db, 'products', String(product.id)), {
             images: [downloadURL]
           });
@@ -1495,6 +1532,19 @@ const AdminDashboard = () => {
                 <h3 className="font-bold">Lista de Produtos</h3>
                 {currentUserRole !== 'viewer' && (
                   <div className="flex gap-2">
+                    <input 
+                      type="file" 
+                      accept=".zip" 
+                      onChange={handleZipUpload} 
+                      className="hidden" 
+                      id="zip-upload"
+                    />
+                    <label 
+                      htmlFor="zip-upload"
+                      className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all cursor-pointer"
+                    >
+                      <Upload size={16} /> Fotos (ZIP)
+                    </label>
                     <button 
                       onClick={() => setIsImportModalOpen(true)}
                       className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all"
@@ -1513,7 +1563,7 @@ const AdminDashboard = () => {
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
                   <tr>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Código</th>
+                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">BARRAS</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Produto</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Preço</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Status</th>
@@ -1523,7 +1573,7 @@ const AdminDashboard = () => {
                 <tbody className="divide-y">
                   {products.slice((currentProductPage - 1) * productsPerPage, currentProductPage * productsPerPage).map(product => (
                     <tr key={product.id} className={`hover:bg-neutral-50 transition-colors ${(product.active === 0 || product.active === false) ? 'opacity-50' : ''}`}>
-                      <td className="p-6 text-black/60">{product.code || '-'}</td>
+                      <td className="p-6 text-black/60">{product.code ? String(product.code).padStart(6, '0') : '-'}</td>
                       <td className="p-6">
                         <div className="flex items-center gap-4">
                           <img src={product.image_url} className="w-12 h-12 rounded-lg object-cover" referrerPolicy="no-referrer" />
@@ -2042,9 +2092,16 @@ const AdminDashboard = () => {
                   </div>
                 </div>
 
-                <div className="col-span-1 md:col-span-2">
+                <div className="col-span-1 md:col-span-2 flex flex-col gap-4">
                   <button type="submit" className="w-full bg-black text-white py-4 rounded-xl font-bold hover:bg-primary hover:text-black transition-all">
                     SALVAR TODAS AS CONFIGURAÇÕES
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setIsResetConfirmOpen(true)}
+                    className="w-full bg-red-600 text-white py-4 rounded-xl font-bold hover:bg-red-700 transition-all"
+                  >
+                    RESETAR BANCO DE DADOS (APAGAR TUDO)
                   </button>
                 </div>
               </form>
@@ -2705,6 +2762,37 @@ const AdminDashboard = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Reset Database Confirmation Modal */}
+      <AnimatePresence>
+        {isResetConfirmOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white p-8 rounded-3xl max-w-md w-full"
+            >
+              <h2 className="text-xl font-bold mb-4">Tem certeza?</h2>
+              <p className="mb-6 text-black/60">Esta ação apagará TODOS os produtos e categorias. Não é possível desfazer.</p>
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setIsResetConfirmOpen(false)}
+                  className="flex-1 px-6 py-3 rounded-xl font-bold hover:bg-neutral-100 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={resetDatabase}
+                  className="flex-1 bg-red-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-red-700 transition-all"
+                >
+                  Sim, apagar tudo
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -2948,11 +3036,17 @@ function AppContent() {
       return;
     }
     try {
+      // Just check if we can get a reference, or catch specific "offline" error
       await getDocFromServer(doc(db, 'test', 'connection'));
       setIsConnected(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Connection test failed:", error);
-      setIsConnected(false);
+      // If it's just "not found", we are actually connected
+      if (error.code === 'not-found') {
+        setIsConnected(true);
+      } else {
+        setIsConnected(false);
+      }
     }
   };
 

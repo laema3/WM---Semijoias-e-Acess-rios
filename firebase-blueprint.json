@@ -1,97 +1,108 @@
 {
   "entities": {
-    "product": {
+    "Product": {
       "title": "Product",
       "description": "A product in the store",
       "type": "object",
       "properties": {
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "price": { "type": "number" },
-        "cost_price": { "type": "number" },
-        "stock": { "type": "integer" },
-        "supplier": { "type": "string" },
-        "image_url": { "type": "string" },
-        "category": { "type": "string" },
-        "category_id": { "type": "string" },
-        "subcategory_id": { "type": "string" },
-        "featured": { "type": "boolean" },
-        "best_seller": { "type": "boolean" },
-        "variations": { "type": "object", "description": "JSON object for variations like size/color" },
-        "created_at": { "type": "string", "format": "date-time" }
+        "name": { "type": "string", "description": "Product name" },
+        "price": { "type": "number", "description": "Product price" },
+        "category": { "type": "string", "description": "Category name" },
+        "image_url": { "type": "string", "description": "Product image URL" },
+        "featured": { "type": "boolean", "description": "Is featured" },
+        "best_seller": { "type": "boolean", "description": "Is best seller" },
+        "variations": { "type": "string", "description": "Product variations JSON" },
+        "active": { "type": "number", "description": "Is active" }
       },
-      "required": ["name", "price", "category_id"]
+      "required": ["name", "price"]
     },
-    "category": {
+    "Category": {
       "title": "Category",
       "description": "Product category",
       "type": "object",
       "properties": {
-        "name": { "type": "string" }
+        "name": { "type": "string", "description": "Category name" },
+        "created_at": { "type": "string", "description": "Creation timestamp" }
       },
       "required": ["name"]
     },
-    "subcategory": {
+    "Subcategory": {
       "title": "Subcategory",
       "description": "Product subcategory",
       "type": "object",
       "properties": {
-        "name": { "type": "string" },
-        "category_id": { "type": "string" }
+        "name": { "type": "string", "description": "Subcategory name" },
+        "category_id": { "type": "string", "description": "Parent category ID" },
+        "created_at": { "type": "string", "description": "Creation timestamp" }
       },
       "required": ["name", "category_id"]
     },
-    "settings": {
-      "title": "Settings",
-      "description": "Store settings",
+    "User": {
+      "title": "User",
+      "description": "Application user",
       "type": "object",
       "properties": {
-        "banner_title": { "type": "string" },
-        "banner_image": { "type": "string" },
+        "name": { "type": "string", "description": "User name" },
+        "email": { "type": "string", "description": "User email" },
+        "role": { "type": "string", "description": "User role (admin, viewer, etc.)" },
+        "created_at": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string", "description": "User ID" },
+        "items": { "type": "array", "description": "Order items" },
+        "total": { "type": "number", "description": "Total amount" },
+        "status": { "type": "string", "description": "Order status" },
+        "created_at": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["user_id", "total", "status"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "App settings",
+      "type": "object",
+      "properties": {
         "logo_url": { "type": "string" },
+        "banner_image": { "type": "string" },
+        "banner_title": { "type": "string" },
         "footer_address": { "type": "string" },
         "footer_phone": { "type": "string" },
         "footer_whatsapp": { "type": "string" },
         "footer_hours": { "type": "string" },
         "google_tag_id": { "type": "string" },
-        "facebook_pixel_id": { "type": "string" },
-        "me_token": { "type": "string" },
-        "me_zip_origin": { "type": "string" },
-        "me_sandbox": { "type": "string" },
-        "mp_public_key": { "type": "string" },
-        "mp_access_token": { "type": "string" }
-      }
-    },
-    "user": {
-      "title": "User",
-      "description": "App user",
-      "type": "object",
-      "properties": {
-        "email": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "customer"] }
+        "facebook_pixel_id": { "type": "string" }
       }
     }
   },
   "firestore": {
     "products/{productId}": {
-      "schema": "product",
-      "description": "Collection of products"
+      "schema": { "$ref": "Product" },
+      "description": "Products collection"
     },
     "categories/{categoryId}": {
-      "schema": "category",
-      "description": "Collection of categories"
+      "schema": { "$ref": "Category" },
+      "description": "Categories collection"
     },
     "subcategories/{subcategoryId}": {
-      "schema": "subcategory",
-      "description": "Collection of subcategories"
-    },
-    "settings/global": {
-      "schema": "settings",
-      "description": "Global settings document"
+      "schema": { "$ref": "Subcategory" },
+      "description": "Subcategories collection"
     },
     "users/{userId}": {
-      "schema": "user",
-      "description": "User profiles"
+      "schema": { "$ref": "User" },
+      "description": "Users collection"
+    },
+    "orders/{orderId}": {
+      "schema": { "$ref": "Order" },
+      "description": "Orders collection"
+    },
+    "settings/{settingId}": {
+      "schema": { "$ref": "Settings" },
+      "description": "Settings collection"
     }
   }
 }

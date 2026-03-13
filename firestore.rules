@@ -2,11 +2,9 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
     // ===============================================================
     // Helper Functions
     // ===============================================================
-
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -18,80 +16,74 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          request.auth.token.email == "camillasites@gmail.com");
+          (request.auth.token.email == "camillasites@gmail.com" && request.auth.token.email_verified == true));
     }
 
-    function isEditor() {
-      return isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
-    }
-
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
-
-    function isValidString(field, minLen, maxLen) {
-      return request.resource.data[field] is string &&
-        request.resource.data[field].size() >= minLen &&
-        request.resource.data[field].size() <= maxLen;
-    }
-
-    function isValidNumber(field) {
-      return request.resource.data[field] is number;
-    }
-
-    function isValidBoolean(field) {
-      return request.resource.data[field] is bool;
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
     }
 
     // ===============================================================
-    // Collection Rules
+    // Domain Validators
+    // ===============================================================
+    function isValidProduct(data) {
+      return hasOnlyAllowedFields(['name', 'price', 'category', 'image_url', 'featured', 'best_seller', 'variations', 'active']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.price is number && data.price > 0;
+    }
+
+    function isValidCategory(data) {
+      return hasOnlyAllowedFields(['name', 'created_at']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 50;
+    }
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['name', 'email', 'role', 'created_at']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.role in ['admin', 'viewer'];
+    }
+
+    // ===============================================================
+    // Rules
     // ===============================================================
 
     match /products/{productId} {
       allow read: if true;
-      allow create: if (isAdmin() || isEditor()) && hasRequiredFields(['name', 'price']) &&
-        isValidString('name', 1, 100) &&
-        isValidNumber('price') &&
-        (!('stock' in request.resource.data) || isValidNumber('stock')) &&
-        (!('cost_price' in request.resource.data) || isValidNumber('cost_price'));
-      allow update: if isAdmin() || isEditor();
+      allow create: if isAdmin() && isValidProduct(request.resource.data);
+      allow update: if isAdmin() && isValidProduct(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /categories/{categoryId} {
       allow read: if true;
-      allow create: if (isAdmin() || isEditor()) && hasRequiredFields(['name']) && isValidString('name', 1, 50);
-      allow update: if isAdmin() || isEditor();
+      allow create: if isAdmin() && isValidCategory(request.resource.data);
+      allow update: if isAdmin() && isValidCategory(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /subcategories/{subcategoryId} {
       allow read: if true;
-      allow create: if (isAdmin() || isEditor()) && hasRequiredFields(['name', 'category_id']) && isValidString('name', 1, 50);
-      allow update: if isAdmin() || isEditor();
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAdmin() && isValidUser(request.resource.data);
+      allow update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isOwner(request.resource.data.user_id) || isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid;
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     match /settings/{settingId} {
       allow read: if true;
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
-    }
-
-    match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && (isAdmin() || (isOwner(userId) && request.resource.data.role in ['viewer', 'customer']));
-      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role);
-      allow delete: if isAdmin();
-    }
-
-    match /orders/{orderId} {
-      allow read: if isAdmin() || isEditor() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if true;
-      allow update: if isAdmin() || isEditor();
-      allow delete: if isAdmin();
+      allow write: if isAdmin();
     }
   }
 }
