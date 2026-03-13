@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 // Use environment variables if available, otherwise fallback to config file (for local dev)
 const firebaseConfig = {
@@ -40,3 +41,16 @@ try {
 // Use specific database ID if provided in config
 export const db = app ? getFirestore(app, finalConfig.databaseId) : null as any;
 export const auth = app ? getAuth(app) : null as any;
+export const storage = app ? getStorage(app) : null as any;
+
+export const checkConnection = async () => {
+  if (!db) return false;
+  try {
+    // Attempt to fetch a dummy document to test connection
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    return true;
+  } catch (error) {
+    console.error("Connection test failed:", error);
+    return false;
+  }
+};

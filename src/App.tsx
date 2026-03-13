@@ -4,10 +4,12 @@ import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, Message
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Category, Subcategory, User as UserType } from './types';
 import AIAgent from './components/AIAgent';
-import { db, auth, finalConfig } from './firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot, getCountFromServer, getDocFromServer } from 'firebase/firestore';
+import { db, auth, storage, finalConfig, checkConnection } from './firebase';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, setDoc, getDoc, onSnapshot, getCountFromServer, getDocFromServer, writeBatch } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from 'firebase/auth';
 import Papa from 'papaparse';
+import JSZip from 'jszip';
 
 // --- Error Handling ---
 
@@ -811,6 +813,7 @@ const AdminDashboard = () => {
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [currentImportingProduct, setCurrentImportingProduct] = useState('');
   
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -840,6 +843,7 @@ const AdminDashboard = () => {
       encoding: "UTF-8", // Tenta UTF-8 primeiro
       transformHeader: (h) => h.trim().toLowerCase(), // Normaliza os cabeçalhos para minúsculo
       complete: (results) => {
+        console.log("CSV parsed successfully. Items:", results.data.length);
         setImportData(results.data);
         setImportPreview(results.data.slice(0, 5));
       },
@@ -850,111 +854,171 @@ const AdminDashboard = () => {
     });
   };
 
+  const cleanCategoryName = (grupo: string) => {
+    if (!grupo) return 'Geral';
+    const parts = grupo.split('>');
+    return parts[parts.length - 1].trim();
+  };
+
   const processImport = async () => {
+    console.log("Iniciando importação...");
     if (importData.length === 0) return;
     
     setIsImporting(true);
     setImportProgress(0);
+    setCurrentImportingProduct('Iniciando...');
+    let importedCount = 0;
 
     try {
-      let importedCount = 0;
       const totalItems = importData.length;
+      const batchSize = 500;
+      let batch = writeBatch(db);
+      let batchCount = 0;
       
-      // 1. Carregar categorias existentes para evitar duplicatas
-      const categoriesSnapshot = await getDocs(collection(db, 'categories'));
-      const categoryMap = new Map<string, string>(); // Nome -> ID
+      // 1. Carregar categorias e produtos existentes para evitar duplicatas e leituras excessivas
+      const [categoriesSnapshot, productsSnapshot] = await Promise.all([
+        getDocs(collection(db, 'categories')),
+        getDocs(collection(db, 'products'))
+      ]);
       
+      const categoryMap = new Map<string, string>();
       categoriesSnapshot.forEach(doc => {
         const data = doc.data();
-        if (data.name) {
-          categoryMap.set(data.name.toLowerCase().trim(), doc.id);
-        }
+        if (data.name) categoryMap.set(data.name.toLowerCase().trim(), doc.id);
       });
 
-      // Função auxiliar para obter ou criar categoria
-      const getOrCreateCategory = async (categoryName: string): Promise<string> => {
+      const productMap = new Map<string, string>(); // Código -> ID
+      productsSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.code) productMap.set(data.code.toString().trim(), doc.id);
+      });
+
+      // Função auxiliar para obter ou criar categoria (localmente)
+      const getOrCreateCategory = (categoryName: string): string => {
         const cleanName = categoryName.trim();
         const lowerName = cleanName.toLowerCase();
+        if (categoryMap.has(lowerName)) return categoryMap.get(lowerName)!;
         
-        if (categoryMap.has(lowerName)) {
-          return categoryMap.get(lowerName)!;
-        }
-
-        // Cria nova categoria
-        const newCatRef = await addDoc(collection(db, 'categories'), { 
+        // Cria ID temporário e registra
+        const newId = doc(collection(db, 'categories')).id;
+        batch.set(doc(db, 'categories', newId), { 
           name: cleanName,
           created_at: new Date().toISOString()
         });
-        
-        categoryMap.set(lowerName, newCatRef.id);
-        return newCatRef.id;
+        categoryMap.set(lowerName, newId);
+        return newId;
       };
 
-      // Mapeamento de categorias para simplificar
-      const cleanCategoryName = (grupo: string) => {
-        if (!grupo) return 'Geral';
-        // Remove caracteres estranhos e pega o último nível se tiver ">"
-        const parts = grupo.split('>');
-        return parts[parts.length - 1].trim();
-      };
-
-      for (const item of importData) {
-        // Pula linhas vazias ou sem nome
+      for (let i = 0; i < importData.length; i++) {
+        const item = importData[i];
         if (!item.nome && !item.produto) continue;
 
-        // Tratamento de Preço (R$ 1.200,50 -> 1200.50)
         const priceStr = item.preço || item.preco || item.valor || '0';
         const price = parseFloat(priceStr.toString().replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
-
-        // Tratamento de Custo
         const costStr = item.custo || '0';
         const cost = parseFloat(costStr.toString().replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
 
-        // Monta a descrição com os detalhes disponíveis
-        const details = [];
-        if (item.cor) details.push(`Cor: ${item.cor}`);
-        if (item.tamanho) details.push(`Tamanho: ${item.tamanho}`);
-        if (item.ref) details.push(`Ref: ${item.ref}`);
-        if (item.barras) details.push(`EAN: ${item.barras}`);
-        
-        const description = details.join('\n') + (item.descricao ? `\n\n${item.descricao}` : '');
-
-        // Resolve a categoria (busca ID ou cria nova)
+        const productCode = (item.código || item.codigo || item.code || '').toString().trim();
+        const productName = item.nome || item.produto || 'Produto Sem Nome';
         const categoryName = cleanCategoryName(item.grupo || item.categoria);
-        const categoryId = await getOrCreateCategory(categoryName);
+        const categoryId = getOrCreateCategory(categoryName);
 
         const product: any = {
-          name: item.nome || item.produto || 'Produto Sem Nome',
+          name: productName,
           price: isNaN(price) ? 0 : price,
           cost_price: isNaN(cost) ? 0 : cost,
-          description: description,
-          category: categoryName, // Mantém o nome para exibição legado
-          category_id: categoryId, // ID para relacionamento correto
+          description: (item.cor ? `Cor: ${item.cor}\n` : '') + (item.tamanho ? `Tamanho: ${item.tamanho}\n` : '') + (item.ref ? `Ref: ${item.ref}\n` : '') + (item.descricao || ''),
+          category: categoryName,
+          category_id: categoryId,
           images: [], 
           featured: false,
           best_seller: false,
           stock: parseInt(item.quantidade || '0'),
           supplier: item.nomefornecedor || '',
+          code: productCode,
           created_at: new Date().toISOString()
         };
 
-        await addDoc(collection(db, 'products'), product);
+        const productId = productMap.has(productCode) ? productMap.get(productCode)! : doc(collection(db, 'products')).id;
+        batch.set(doc(db, 'products', productId), product, { merge: true });
+        
+        batchCount++;
         importedCount++;
-        setImportProgress(Math.round((importedCount / totalItems) * 100));
+
+        if (batchCount === batchSize) {
+          await batch.commit();
+          batch = writeBatch(db);
+          batchCount = 0;
+        }
+
+        setImportProgress(Math.round(((i + 1) / totalItems) * 100));
+        setCurrentImportingProduct(productName);
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
       }
       
-      alert(`${importedCount} produtos importados com sucesso!`);
-      setIsImportModalOpen(false);
+      // alert(`${importedCount} produtos importados com sucesso!`);
+      // setIsImportModalOpen(false); // Não fechar automaticamente
       setImportData([]);
       setImportPreview([]);
       fetchProducts();
-      fetchCategories(); // Atualiza a lista de categorias também
+      fetchCategories();
     } catch (error) {
       console.error("Error importing products:", error);
       alert("Erro ao importar produtos. Verifique o console para mais detalhes.");
     } finally {
       setIsImporting(false);
       setImportProgress(0);
+      setCurrentImportingProduct('');
+    }
+  };
+
+  const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    setCurrentImportingProduct('Descompactando ZIP...');
+    setImportProgress(0);
+
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const files = Object.keys(zip.files).filter(f => !zip.files[f].dir && /\.(jpg|jpeg|png|webp)$/i.test(f));
+      const totalFiles = files.length;
+      let processedFiles = 0;
+
+      for (const filename of files) {
+        const fileData = await zip.files[filename].async('blob');
+        const storageRef = ref(storage, `products/${filename}`);
+        
+        await uploadBytes(storageRef, fileData);
+        const downloadURL = await getDownloadURL(storageRef);
+
+        // Tenta encontrar o produto pelo nome do arquivo (sem extensão)
+        const productName = filename.split('.')[0];
+        const product = products.find(p => p.name.toLowerCase() === productName.toLowerCase() || p.code === productName);
+
+        if (product) {
+          await updateDoc(doc(db, 'products', String(product.id)), {
+            images: [downloadURL]
+          });
+        }
+
+        processedFiles++;
+        setImportProgress(Math.round((processedFiles / totalFiles) * 100));
+        setCurrentImportingProduct(`Processando: ${filename}`);
+      }
+
+      alert(`Upload de ${processedFiles} imagens concluído!`);
+    } catch (error) {
+      console.error("Erro ao processar ZIP:", error);
+      alert("Erro ao processar o arquivo ZIP.");
+    } finally {
+      setIsImporting(false);
+      setImportProgress(0);
+      setCurrentImportingProduct('');
     }
   };
 
@@ -1075,6 +1139,7 @@ const AdminDashboard = () => {
     try {
       const querySnapshot = await getDocs(collection(db, 'products'));
       const productsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+      console.log('fetchProducts loaded:', productsData.length);
       productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setProducts(productsData);
     } catch (error) {
@@ -1448,8 +1513,8 @@ const AdminDashboard = () => {
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
                   <tr>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Produto</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Código</th>
+                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Produto</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Preço</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Status</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40 text-right">Ações</th>
@@ -1458,6 +1523,7 @@ const AdminDashboard = () => {
                 <tbody className="divide-y">
                   {products.slice((currentProductPage - 1) * productsPerPage, currentProductPage * productsPerPage).map(product => (
                     <tr key={product.id} className={`hover:bg-neutral-50 transition-colors ${(product.active === 0 || product.active === false) ? 'opacity-50' : ''}`}>
+                      <td className="p-6 text-black/60">{product.code || '-'}</td>
                       <td className="p-6">
                         <div className="flex items-center gap-4">
                           <img src={product.image_url} className="w-12 h-12 rounded-lg object-cover" referrerPolicy="no-referrer" />
@@ -1467,7 +1533,6 @@ const AdminDashboard = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="p-6 text-black/60">{product.code || '-'}</td>
                       <td className="p-6 font-medium">R$ {product.price.toLocaleString('pt-BR')}</td>
                       <td className="p-6">
                         <div className="flex gap-2">
@@ -1498,7 +1563,7 @@ const AdminDashboard = () => {
                           )}
                           {currentUserRole === 'admin' && (
                             <button 
-                              onClick={() => { setProductToDelete(product.id); setIsConfirmOpen(true); }}
+                              onClick={() => { setProductToDelete(String(product.id)); setIsConfirmOpen(true); }}
                               className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
                             >
                               <Trash2 size={18} />
@@ -1578,7 +1643,7 @@ const AdminDashboard = () => {
                             <button 
                               onClick={() => {
                                 if (window.confirm('Excluir esta categoria?')) {
-                                  setCatToDelete(cat.id);
+                                  setCatToDelete(String(cat.id));
                                   handleDeleteCategory();
                                 }
                               }}
@@ -1640,7 +1705,7 @@ const AdminDashboard = () => {
                             <button 
                               onClick={() => {
                                 if (window.confirm('Excluir esta subcategoria?')) {
-                                  setSubToDelete(sub.id);
+                                  setSubToDelete(String(sub.id));
                                   handleDeleteSubcategory();
                                 }
                               }}
@@ -2564,10 +2629,24 @@ const AdminDashboard = () => {
                   </p>
                 </div>
 
+                <div className="mb-6">
+                  <label className="block text-sm font-bold mb-2">Selecione o arquivo ZIP de Imagens</label>
+                  <input 
+                    type="file" 
+                    accept=".zip"
+                    onChange={handleZipUpload}
+                    disabled={isImporting}
+                    className="w-full p-3 border rounded-xl disabled:opacity-50"
+                  />
+                  <p className="text-xs text-neutral-500 mt-2">
+                    O nome dos arquivos de imagem deve corresponder ao nome ou código do produto.
+                  </p>
+                </div>
+
                 {isImporting && (
                   <div className="mb-6">
                     <div className="flex justify-between text-sm font-bold mb-2">
-                      <span>Importando produtos...</span>
+                      <span>Importando: {currentImportingProduct}</span>
                       <span>{importProgress}%</span>
                     </div>
                     <div className="w-full bg-neutral-100 rounded-full h-2.5 overflow-hidden">
@@ -2727,7 +2806,7 @@ const Shop = ({ products, categories, onAddToCart, settings }: { products: Produ
             <p className="text-black/60">Nenhum produto encontrado nesta categoria.</p>
           ) : (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                 {currentProducts.map(product => (
                   <Link key={product.id} to={`/product/${product.id}`}>
                     <ProductCard product={product} onAddToCart={onAddToCart} />
@@ -2861,24 +2940,31 @@ function AppContent() {
   const [settings, setSettings] = useState<any>({});
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
+
+  const testConnection = async () => {
+    if (!db) {
+      setIsConnected(false);
+      return;
+    }
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+      setIsConnected(true);
+    } catch (error) {
+      console.error("Connection test failed:", error);
+      setIsConnected(false);
+    }
+  };
 
   useEffect(() => {
     if (!db) return;
 
     // Connection Test
-    const testConnection = async () => {
-      try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. The client is offline.");
-        }
-      }
-    };
     testConnection();
 
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
       const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+      console.log('Products loaded:', productsData.length);
       productsData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setProducts(productsData);
     }, (error) => {
@@ -2925,6 +3011,12 @@ function AppContent() {
 
   return (
     <Router>
+      {isConnected === false && (
+        <div className="fixed top-4 left-4 z-[200] bg-red-500 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+          <span>Desconectado</span>
+          <button onClick={testConnection} className="underline hover:text-red-100">Tentar reconectar</button>
+        </div>
+      )}
       <GlobalLoader />
       <MaintenanceCheck settings={settings}>
         <div className="min-h-screen flex flex-col">

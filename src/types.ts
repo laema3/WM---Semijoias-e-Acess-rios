@@ -5,6 +5,7 @@ export interface Product {
   price: number;
   image_url: string;
   category_id: string | number;
+  category?: string;
   subcategory_id: string | number;
   featured: boolean | number;
   best_seller: boolean | number;
