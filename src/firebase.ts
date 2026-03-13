@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, collection, getDocs } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -16,7 +16,8 @@ export const storage = getStorage(app);
 export const checkConnection = async () => {
   try {
     // Attempt to fetch a dummy document to test connection
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    // Check 'products' as it is publicly readable
+    await getDocs(collection(db, 'products'));
     return true;
   } catch (error) {
     console.error("Connection test failed:", error);

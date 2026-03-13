@@ -3036,17 +3036,12 @@ function AppContent() {
       return;
     }
     try {
-      // Just check if we can get a reference, or catch specific "offline" error
-      await getDocFromServer(doc(db, 'test', 'connection'));
+      // Check 'products' as it is publicly readable
+      await getDocs(collection(db, 'products'));
       setIsConnected(true);
     } catch (error: any) {
       console.error("Connection test failed:", error);
-      // If it's just "not found", we are actually connected
-      if (error.code === 'not-found') {
-        setIsConnected(true);
-      } else {
-        setIsConnected(false);
-      }
+      setIsConnected(false);
     }
   };
 
