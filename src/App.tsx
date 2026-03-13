@@ -1207,10 +1207,15 @@ const AdminDashboard = () => {
 
   const handleDelete = async () => {
     if (productToDelete) {
-      await deleteDoc(doc(db, 'products', String(productToDelete)));
-      setIsConfirmOpen(false);
-      setProductToDelete(null);
-      fetchProducts();
+      try {
+        await deleteDoc(doc(db, 'products', String(productToDelete)));
+        setIsConfirmOpen(false);
+        setProductToDelete(null);
+        fetchProducts();
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `products/${productToDelete}`);
+        alert('Erro ao excluir produto. Verifique suas permissões.');
+      }
     }
   };
 
@@ -1229,41 +1234,61 @@ const AdminDashboard = () => {
 
   const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingCategory?.id) {
-      await updateDoc(doc(db, 'categories', String(editingCategory.id)), editingCategory);
-    } else {
-      await addDoc(collection(db, 'categories'), editingCategory);
+    try {
+      if (editingCategory?.id) {
+        await updateDoc(doc(db, 'categories', String(editingCategory.id)), editingCategory);
+      } else {
+        await addDoc(collection(db, 'categories'), { ...editingCategory, created_at: new Date().toISOString() });
+      }
+      setIsCatModalOpen(false);
+      setEditingCategory(null);
+      fetchCategories();
+    } catch (error) {
+      handleFirestoreError(error, editingCategory?.id ? OperationType.UPDATE : OperationType.CREATE, 'categories');
+      alert('Erro ao salvar categoria.');
     }
-    setIsCatModalOpen(false);
-    setEditingCategory(null);
-    fetchCategories();
   };
 
   const handleDeleteCategory = async () => {
     if (catToDelete) {
-      await deleteDoc(doc(db, 'categories', String(catToDelete)));
-      setCatToDelete(null);
-      fetchCategories();
+      try {
+        await deleteDoc(doc(db, 'categories', String(catToDelete)));
+        setCatToDelete(null);
+        fetchCategories();
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `categories/${catToDelete}`);
+        alert('Erro ao excluir categoria.');
+      }
     }
   };
 
   const handleSaveSubcategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingSubcategory?.id) {
-      await updateDoc(doc(db, 'subcategories', String(editingSubcategory.id)), editingSubcategory);
-    } else {
-      await addDoc(collection(db, 'subcategories'), editingSubcategory);
+    try {
+      if (editingSubcategory?.id) {
+        await updateDoc(doc(db, 'subcategories', String(editingSubcategory.id)), editingSubcategory);
+      } else {
+        await addDoc(collection(db, 'subcategories'), { ...editingSubcategory, created_at: new Date().toISOString() });
+      }
+      setIsSubModalOpen(false);
+      setEditingSubcategory(null);
+      fetchSubcategories();
+    } catch (error) {
+      handleFirestoreError(error, editingSubcategory?.id ? OperationType.UPDATE : OperationType.CREATE, 'subcategories');
+      alert('Erro ao salvar subcategoria.');
     }
-    setIsSubModalOpen(false);
-    setEditingSubcategory(null);
-    fetchSubcategories();
   };
 
   const handleDeleteSubcategory = async () => {
     if (subToDelete) {
-      await deleteDoc(doc(db, 'subcategories', String(subToDelete)));
-      setSubToDelete(null);
-      fetchSubcategories();
+      try {
+        await deleteDoc(doc(db, 'subcategories', String(subToDelete)));
+        setSubToDelete(null);
+        fetchSubcategories();
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `subcategories/${subToDelete}`);
+        alert('Erro ao excluir subcategoria.');
+      }
     }
   };
 
@@ -1319,16 +1344,21 @@ const AdminDashboard = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingProduct?.id) {
-      const { id, ...data } = editingProduct;
-      await updateDoc(doc(db, 'products', String(id)), data);
-    } else {
-      await addDoc(collection(db, 'products'), { ...editingProduct, active: 1 });
+    try {
+      if (editingProduct?.id) {
+        const { id, ...data } = editingProduct;
+        await updateDoc(doc(db, 'products', String(id)), data);
+      } else {
+        await addDoc(collection(db, 'products'), { ...editingProduct, active: 1, created_at: new Date().toISOString() });
+      }
+      
+      setIsModalOpen(false);
+      setEditingProduct(null);
+      fetchProducts();
+    } catch (error) {
+      handleFirestoreError(error, editingProduct?.id ? OperationType.UPDATE : OperationType.CREATE, 'products');
+      alert('Erro ao salvar produto. Verifique se todos os campos estão corretos e se você tem permissão.');
     }
-    
-    setIsModalOpen(false);
-    setEditingProduct(null);
-    fetchProducts();
   };
 
   return (
