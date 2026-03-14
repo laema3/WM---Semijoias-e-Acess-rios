@@ -238,7 +238,7 @@ const ProductCard = ({ product, onAddToCart }: { product: Product, onAddToCart: 
       whileHover={{ y: -10 }}
       className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all border border-black/5 flex flex-col h-full"
     >
-      <div className="relative aspect-[4/5] overflow-hidden bg-neutral-100 flex items-center justify-center">
+      <div className="relative aspect-square overflow-hidden bg-neutral-100 flex items-center justify-center">
         {product.image_url ? (
           <img 
             src={product.image_url} 
@@ -397,7 +397,7 @@ const Home = ({ products, onAddToCart, settings }: { products: Product[], onAddT
               ))
             ) : (
               [1, 2, 3, 4].map(i => (
-                <div key={i} className="animate-pulse bg-neutral-100 aspect-[4/5] rounded-2xl" />
+                <div key={i} className="animate-pulse bg-neutral-100 aspect-square rounded-2xl" />
               ))
             )}
           </div>
@@ -453,7 +453,7 @@ const Home = ({ products, onAddToCart, settings }: { products: Product[], onAddT
               ))
             ) : (
               [1, 2, 3, 4].map(i => (
-                <div key={i} className="animate-pulse bg-neutral-200 aspect-[4/5] rounded-2xl" />
+                <div key={i} className="animate-pulse bg-neutral-200 aspect-square rounded-2xl" />
               ))
             )}
           </div>
@@ -509,7 +509,7 @@ const ProductDetail = ({ products, onAddToCart }: { products: Product[], onAddTo
         <motion.div 
           initial={{ opacity: 0, x: -50 }}
           animate={{ opacity: 1, x: 0 }}
-          className="aspect-[4/5] rounded-3xl overflow-hidden shadow-2xl bg-neutral-100 flex items-center justify-center"
+          className="aspect-square rounded-3xl overflow-hidden shadow-2xl bg-neutral-100 flex items-center justify-center"
         >
           {product.image_url ? (
             <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -868,19 +868,24 @@ const AdminDashboard = () => {
   
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 1024 * 1024) { // 1MB limit for Firestore document size
-        alert("A imagem deve ter no máximo 1MB.");
-        return;
+      setIsUploadingImage(true);
+      try {
+        const filename = `${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, `products/${filename}`);
+        await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(storageRef);
+        setEditingProduct(prev => ({ ...prev, image_url: downloadURL }));
+      } catch (error) {
+        console.error("Erro ao fazer upload da imagem:", error);
+        alert("Erro ao fazer upload da imagem.");
+      } finally {
+        setIsUploadingImage(false);
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setEditingProduct(prev => ({ ...prev, image_url: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
     }
   };
 
@@ -923,6 +928,7 @@ const AdminDashboard = () => {
     const query = productSearchQuery.toLowerCase().trim();
     filteredAdminProducts = products.filter(p => 
       p.name?.toLowerCase().includes(query) || 
+      p.description?.toLowerCase().includes(query) ||
       String(p.code || '').includes(query) || 
       String(p.barcode || '').includes(query)
     );
@@ -1111,8 +1117,14 @@ const AdminDashboard = () => {
       // Mapa para busca rápida de produtos (O(1) em vez de O(N))
       const productMap = new Map<string, any>();
       products.forEach(p => {
-        if (p.code) productMap.set(p.code.toString().trim(), p);
-        if (p.name) productMap.set(p.name.toLowerCase().trim(), p);
+        if (p.code) {
+          const codeStr = p.code.toString().trim();
+          productMap.set(codeStr, p);
+          productMap.set(codeStr.replace(/^0+/, ''), p); // Sem zeros à esquerda
+        }
+        if (p.name) {
+          productMap.set(p.name.toLowerCase().trim(), p);
+        }
       });
 
       // Processar em lotes (concorrência) para ser mais rápido e não travar
@@ -1137,18 +1149,16 @@ const AdminDashboard = () => {
             // O formato é "CODIGO_IDFOTO_produto.jpg" (ex: "486_1000_produto.jpg")
             // O código do produto é sempre a primeira parte antes do primeiro underline.
             const productCode = nameWithoutExt.split('_')[0].trim();
-
+            const productCodeWithoutZeros = productCode.replace(/^0+/, ''); // Remove zeros à esquerda
+            
             // Tenta encontrar o produto pelo código extraído de várias formas:
-            // 1. Código exato (ex: "486")
-            // 2. Código com preenchimento de zeros à esquerda até 6 dígitos (ex: "000486")
-            // 3. Código com preenchimento de zeros à esquerda até 5 dígitos (ex: "00486")
-            // 4. Código com preenchimento de zeros à esquerda até 4 dígitos (ex: "0486")
-            const paddedCode6 = productCode.padStart(6, '0');
-            const paddedCode5 = productCode.padStart(5, '0');
-            const paddedCode4 = productCode.padStart(4, '0');
+            const paddedCode6 = productCodeWithoutZeros.padStart(6, '0');
+            const paddedCode5 = productCodeWithoutZeros.padStart(5, '0');
+            const paddedCode4 = productCodeWithoutZeros.padStart(4, '0');
 
             let product = productMap.get(productCode) || 
                           productMap.get(productCode.toLowerCase()) || 
+                          productMap.get(productCodeWithoutZeros) ||
                           productMap.get(paddedCode6) ||
                           productMap.get(paddedCode5) ||
                           productMap.get(paddedCode4);
@@ -1158,7 +1168,9 @@ const AdminDashboard = () => {
               const possibleKeys = [
                 nameWithoutExt.trim(),
                 nameWithoutExt.split('-')[0].trim(),
-                nameWithoutExt.split(' ')[0].trim()
+                nameWithoutExt.split(' ')[0].trim(),
+                nameWithoutExt.replace(/_/g, ' ').trim(), // colar_gota_verde -> colar gota verde
+                nameWithoutExt.replace(/-/g, ' ').trim()  // colar-gota-verde -> colar gota verde
               ];
               for (const key of possibleKeys) {
                 product = productMap.get(key) || productMap.get(key.toLowerCase());
@@ -2584,8 +2596,10 @@ const AdminDashboard = () => {
                       type="file" 
                       accept="image/*"
                       onChange={handleImageUpload}
-                      className="w-full p-3 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary text-sm" 
+                      disabled={isUploadingImage}
+                      className="w-full p-3 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary text-sm disabled:opacity-50" 
                     />
+                    {isUploadingImage && <p className="text-xs text-primary font-bold text-center animate-pulse">Enviando imagem...</p>}
                     <div className="text-xs text-black/40 text-center">OU</div>
                     <input 
                       type="text" 
@@ -3125,6 +3139,7 @@ const Shop = ({ products, categories, onAddToCart, settings }: { products: Produ
     const query = searchQuery.toLowerCase().trim();
     filteredProducts = filteredProducts.filter(p => 
       p.name?.toLowerCase().includes(query) || 
+      p.description?.toLowerCase().includes(query) ||
       String(p.code || '').includes(query) || 
       String(p.barcode || '').includes(query)
     );
@@ -3478,7 +3493,7 @@ function AppContent() {
                     <div className="flex flex-col gap-6">
                       {cart.map(item => (
                         <div key={item.id} className="flex gap-4">
-                          <img src={item.image_url} alt={item.name} className="w-20 h-24 object-cover rounded-lg" referrerPolicy="no-referrer" />
+                          <img src={item.image_url} alt={item.name} className="w-20 h-20 object-cover rounded-lg" referrerPolicy="no-referrer" />
                           <div className="flex-1">
                             <h3 className="font-bold">{item.name}</h3>
                             <p className="text-sm text-black/60">Qtd: {item.quantity}</p>
