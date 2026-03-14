@@ -1077,7 +1077,7 @@ const AdminDashboard = () => {
 
     setIsImportModalOpen(true);
     setIsImporting(true);
-    setCurrentImportingProduct('Descompactando ZIP...');
+    setCurrentImportingProduct('Lendo arquivo ZIP (isso pode demorar e consumir memória)...');
     setImportProgress(0);
 
     try {
@@ -1086,6 +1086,15 @@ const AdminDashboard = () => {
       const totalFiles = files.length;
       let processedFiles = 0;
 
+      if (totalFiles > 1000) {
+        const proceed = window.confirm(`Você está tentando importar ${totalFiles} imagens de uma vez. Isso pode travar o seu navegador por falta de memória. Deseja continuar mesmo assim? (Recomendamos dividir em arquivos ZIP menores, com cerca de 500 imagens cada).`);
+        if (!proceed) {
+          setIsImporting(false);
+          setIsImportModalOpen(false);
+          return;
+        }
+      }
+
       // Mapa para busca rápida de produtos (O(1) em vez de O(N))
       const productMap = new Map<string, any>();
       products.forEach(p => {
@@ -1093,47 +1102,57 @@ const AdminDashboard = () => {
         if (p.name) productMap.set(p.name.toLowerCase().trim(), p);
       });
 
-      for (let i = 0; i < files.length; i++) {
-        const filename = files[i];
-        const fileData = await zip.files[filename].async('blob');
-        const storageRef = ref(storage, `products/${filename}`);
+      // Processar em lotes (concorrência) para ser mais rápido e não travar
+      const concurrencyLimit = 10; 
+      
+      for (let i = 0; i < files.length; i += concurrencyLimit) {
+        const batch = files.slice(i, i + concurrencyLimit);
         
-        await uploadBytes(storageRef, fileData);
-        const downloadURL = await getDownloadURL(storageRef);
+        await Promise.all(batch.map(async (filename) => {
+          try {
+            const fileData = await zip.files[filename].async('blob');
+            const storageRef = ref(storage, `products/${filename}`);
+            
+            await uploadBytes(storageRef, fileData);
+            const downloadURL = await getDownloadURL(storageRef);
 
-        // Tenta encontrar o produto pelo nome do arquivo (sem extensão)
-        const productName = filename.split('.')[0].trim();
-        const paddedName = productName.padStart(6, '0');
-        
-        const product = productMap.get(productName) || productMap.get(productName.toLowerCase()) || productMap.get(paddedName);
+            // Tenta encontrar o produto pelo nome do arquivo (sem extensão)
+            const productName = filename.split('.')[0].trim();
+            const paddedName = productName.padStart(6, '0');
+            
+            const product = productMap.get(productName) || productMap.get(productName.toLowerCase()) || productMap.get(paddedName);
 
-        if (product) {
-          const currentImages = Array.isArray(product.images) ? product.images : [];
-          const newImages = currentImages.includes(downloadURL) ? currentImages : [...currentImages, downloadURL];
-          
-          await updateDoc(doc(db, 'products', String(product.id)), {
-            image_url: currentImages.length === 0 ? downloadURL : (product.image_url || downloadURL),
-            images: newImages
-          });
-        }
+            if (product) {
+              const currentImages = Array.isArray(product.images) ? product.images : [];
+              const newImages = currentImages.includes(downloadURL) ? currentImages : [...currentImages, downloadURL];
+              
+              await updateDoc(doc(db, 'products', String(product.id)), {
+                image_url: currentImages.length === 0 ? downloadURL : (product.image_url || downloadURL),
+                images: newImages
+              });
+            }
+          } catch (err) {
+            console.error(`Erro ao processar imagem ${filename}:`, err);
+          } finally {
+            processedFiles++;
+          }
+        }));
 
-        processedFiles++;
-        
-        // Atualiza UI apenas a cada 5 itens para não travar o browser
-        if (processedFiles % 5 === 0 || processedFiles === totalFiles) {
-          setImportProgress(Math.round((processedFiles / totalFiles) * 100));
-          setCurrentImportingProduct(`Processando: ${filename}`);
-        }
+        // Atualiza UI a cada lote concluído
+        setImportProgress(Math.round((processedFiles / totalFiles) * 100));
+        setCurrentImportingProduct(`Processando lote... (${processedFiles} de ${totalFiles})`);
       }
 
-      alert(`Upload de ${processedFiles} imagens concluído!`);
+      alert(`Upload de ${processedFiles} imagens concluído com sucesso!`);
     } catch (error) {
       console.error("Erro ao processar ZIP:", error);
-      alert("Erro ao processar o arquivo ZIP.");
+      alert("Erro ao processar o arquivo ZIP. O arquivo pode estar corrompido ou ser muito grande para a memória do navegador.");
     } finally {
       setIsImporting(false);
       setImportProgress(0);
       setCurrentImportingProduct('');
+      // Limpa o input file para permitir selecionar o mesmo arquivo novamente se necessário
+      e.target.value = '';
     }
   };
 
