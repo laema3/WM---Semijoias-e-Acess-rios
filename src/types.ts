@@ -12,6 +12,8 @@ export interface Product {
   variations: any; // Can be string (from DB) or object (parsed)
   active?: boolean | number;
   code?: string;
+  barcode?: string;
+  images?: string[];
 }
 
 export interface Category {

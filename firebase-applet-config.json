@@ -1,10 +1,11 @@
 {
-  "projectId": "gen-lang-client-0623147734",
-  "appId": "1:793033861196:web:b7a0abb3358f598307ece9",
-  "apiKey": "AIzaSyAOBG5I0FZB4tNbvS5pG4UVeOHI1fMbJrM",
-  "authDomain": "gen-lang-client-0623147734.firebaseapp.com",
-  "firestoreDatabaseId": "vendas",
-  "storageBucket": "gen-lang-client-0623147734.firebasestorage.app",
-  "messagingSenderId": "793033861196",
-  "measurementId": ""
+  "apiKey": "AIzaSyDWgHS7AOM2OMR8fy-AI72H3f3cjmrFAdw",
+  "authDomain": "wm-semijoias-e-acessorio-fda30.firebaseapp.com",
+  "databaseURL": "https://wm-semijoias-e-acessorio-fda30-default-rtdb.firebaseio.com",
+  "projectId": "wm-semijoias-e-acessorio-fda30",
+  "storageBucket": "wm-semijoias-e-acessorio-fda30.firebasestorage.app",
+  "messagingSenderId": "189803099492",
+  "appId": "1:189803099492:web:4def4323ede62b401af671",
+  "measurementId": "G-772MRMEVY9",
+  "firestoreDatabaseId": "(default)"
 }

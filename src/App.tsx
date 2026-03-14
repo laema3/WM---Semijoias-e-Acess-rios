@@ -10,6 +10,7 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from 'firebase/auth';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
+import firebaseConfig from '../firebase-applet-config.json';
 
 // --- Error Handling ---
 
@@ -526,7 +527,8 @@ const ProductDetail = ({ products, onAddToCart }: { products: Product[], onAddTo
           className="flex flex-col"
         >
           <h3 className="text-primary font-bold uppercase tracking-widest mb-4">Semi Joia Premium</h3>
-          <h1 className="text-5xl font-serif font-bold mb-6">{product.name}</h1>
+          <h1 className="text-5xl font-serif font-bold mb-2">{product.name}</h1>
+          {product.code && <p className="text-xs font-bold text-black/40 uppercase tracking-widest mb-6">Cód: {String(product.code).padStart(6, '0')}</p>}
           <p className="text-3xl font-bold text-primary mb-8">R$ {product.price.toLocaleString('pt-BR')}</p>
           <p className="text-black/60 leading-relaxed mb-10">{product.description}</p>
 
@@ -677,6 +679,19 @@ const AdminLogin = () => {
 
   const [isRegistering, setIsRegistering] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        navigate('/admin/dashboard');
+      }
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -717,18 +732,52 @@ const AdminLogin = () => {
       setError('Por favor, digite seu e-mail acima para redefinir a senha.');
       return;
     }
+    setIsResetting(true);
+    setError('');
+    setResetSuccess(false);
     try {
       await sendPasswordResetEmail(auth, email);
       setResetSent(true);
-      setError('');
-      alert('E-mail de redefinição de senha enviado! Verifique sua caixa de entrada.');
+      setResetSuccess(true);
+      // No alert, use UI feedback
     } catch (err: any) {
-      setError(err.message || 'Erro ao enviar e-mail de redefinição.');
+      console.error("Reset password error:", err);
+      if (err.code === 'auth/user-not-found') {
+        setError('E-mail não encontrado em nossa base de dados.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('E-mail inválido.');
+      } else {
+        setError('Erro ao enviar e-mail de redefinição. Tente novamente mais tarde.');
+      }
+    } finally {
+      setIsResetting(false);
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-white/60 font-serif italic">Verificando acesso...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      <div className="fixed top-4 right-4 z-50">
+        <button 
+          onClick={async () => {
+            const connected = await checkConnection();
+            alert(connected ? "Conexão com Firebase OK!" : "Erro de conexão com Firebase. Verifique as configurações.");
+          }}
+          className="bg-white/10 hover:bg-white/20 text-white/60 text-xs px-4 py-2 rounded-full transition-all flex items-center gap-2"
+        >
+          <Zap size={14} /> Testar Conexão
+        </button>
+      </div>
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -739,7 +788,8 @@ const AdminLogin = () => {
           <p className="text-black/60">{isRegistering ? 'Criar conta de acesso' : 'Acesso restrito para equipe'}</p>
         </div>
         <form onSubmit={handleLogin} className="p-10 flex flex-col gap-6">
-          {error && <div className="bg-red-50 text-red-500 p-4 rounded-xl text-sm font-medium">{error}</div>}
+          {error && <div className="bg-red-50 text-red-500 p-4 rounded-xl text-sm font-medium border border-red-100">{error}</div>}
+          {resetSuccess && <div className="bg-green-50 text-green-600 p-4 rounded-xl text-sm font-medium border border-green-100">E-mail de redefinição enviado! Verifique sua caixa de entrada.</div>}
           <div className="flex flex-col gap-2">
             <label className="text-xs font-bold uppercase tracking-widest text-black/40">E-mail</label>
             <input 
@@ -779,9 +829,10 @@ const AdminLogin = () => {
               <button 
                 type="button" 
                 onClick={handleResetPassword}
-                className="text-sm font-medium text-primary hover:text-black transition-colors"
+                disabled={isResetting}
+                className="text-sm font-bold text-primary hover:text-black transition-colors disabled:opacity-50"
               >
-                Esqueci minha senha
+                {isResetting ? 'Enviando...' : 'Esqueci minha senha'}
               </button>
             )}
           </div>
@@ -814,6 +865,9 @@ const AdminDashboard = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [currentImportingProduct, setCurrentImportingProduct] = useState('');
+  
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
   
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -871,7 +925,6 @@ const AdminDashboard = () => {
       header: true,
       skipEmptyLines: true,
       encoding: "UTF-8",
-      delimiter: ";", // Explicitly set semicolon delimiter
       transformHeader: (h) => h.trim().toLowerCase(),
       complete: (results) => {
         console.log("CSV parsed successfully. Items:", results.data.length);
@@ -902,11 +955,14 @@ const AdminDashboard = () => {
 
     try {
       const totalItems = importData.length;
-      const batchSize = 500;
+      const batchSize = 250; // Reduzido para dar margem a categorias e evitar limites
       let batch = writeBatch(db);
-      let batchCount = 0;
+      let operationsInBatch = 0;
       
-      // 1. Carregar categorias e produtos existentes para evitar duplicatas e leituras excessivas
+      console.log(`Total de itens para processar: ${totalItems}`);
+
+      // 1. Carregar categorias e produtos existentes
+      setCurrentImportingProduct('Carregando dados existentes...');
       const [categoriesSnapshot, productsSnapshot] = await Promise.all([
         getDocs(collection(db, 'categories')),
         getDocs(collection(db, 'products'))
@@ -918,25 +974,24 @@ const AdminDashboard = () => {
         if (data.name) categoryMap.set(data.name.toLowerCase().trim(), doc.id);
       });
 
-      const productMap = new Map<string, string>(); // Código -> ID
+      const productMap = new Map<string, string>();
       productsSnapshot.forEach(doc => {
         const data = doc.data();
         if (data.code) productMap.set(data.code.toString().trim(), doc.id);
       });
 
-      // Função auxiliar para obter ou criar categoria (localmente)
       const getOrCreateCategory = (categoryName: string): string => {
         const cleanName = categoryName.trim();
         const lowerName = cleanName.toLowerCase();
         if (categoryMap.has(lowerName)) return categoryMap.get(lowerName)!;
         
-        // Cria ID temporário e registra
         const newId = doc(collection(db, 'categories')).id;
         batch.set(doc(db, 'categories', newId), { 
           name: cleanName,
           created_at: new Date().toISOString()
         });
         categoryMap.set(lowerName, newId);
+        operationsInBatch++;
         return newId;
       };
 
@@ -949,7 +1004,8 @@ const AdminDashboard = () => {
         const costStr = item.custo || '0';
         const cost = parseFloat(costStr.toString().replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
 
-        const productCode = (item.barras || item.código || item.codigo || item.code || '').toString().trim();
+        const productCode = (item.código || item.codigo || item.code || item.ref || '').toString().trim();
+        const barcode = (item.barras || item.barcode || item.gtin || item.ean || '').toString().trim();
         const productName = item.nome || item.produto || 'Produto Sem Nome';
         const categoryName = cleanCategoryName(item.grupo || item.categoria);
         const categoryId = getOrCreateCategory(categoryName);
@@ -967,38 +1023,47 @@ const AdminDashboard = () => {
           stock: parseInt(item.quantidade || '0'),
           supplier: item.nomefornecedor || '',
           code: productCode,
+          barcode: barcode,
           created_at: new Date().toISOString()
         };
 
         const productId = productMap.has(productCode) ? productMap.get(productCode)! : doc(collection(db, 'products')).id;
         batch.set(doc(db, 'products', productId), product, { merge: true });
         
-        batchCount++;
+        operationsInBatch++;
         importedCount++;
 
-        if (batchCount === batchSize) {
+        // Commit se atingir o limite ou a cada 250 operações
+        if (operationsInBatch >= batchSize) {
+          console.log(`Commiting batch... (${importedCount}/${totalItems})`);
           await batch.commit();
+          // Pequena pausa para não sobrecarregar o Firebase e o navegador
+          await new Promise(resolve => setTimeout(resolve, 500));
           batch = writeBatch(db);
-          batchCount = 0;
+          operationsInBatch = 0;
         }
 
-        setImportProgress(Math.round(((i + 1) / totalItems) * 100));
-        setCurrentImportingProduct(productName);
+        // Atualiza UI apenas a cada 10 itens para não travar o browser
+        if (i % 10 === 0 || i === totalItems - 1) {
+          setImportProgress(Math.round(((i + 1) / totalItems) * 100));
+          setCurrentImportingProduct(productName);
+        }
       }
 
-      if (batchCount > 0) {
+      if (operationsInBatch > 0) {
+        console.log("Commiting final batch...");
         await batch.commit();
       }
       
-      // alert(`${importedCount} produtos importados com sucesso!`);
-      // setIsImportModalOpen(false); // Não fechar automaticamente
+      console.log("Importação finalizada com sucesso!");
       setImportData([]);
       setImportPreview([]);
       fetchProducts();
       fetchCategories();
-    } catch (error) {
-      console.error("Error importing products:", error);
-      alert("Erro ao importar produtos. Verifique o console para mais detalhes.");
+      alert(`${importedCount} produtos processados com sucesso!`);
+    } catch (error: any) {
+      console.error("Erro crítico na importação:", error);
+      alert(`A importação parou no produto ${importedCount} devido a um erro: ${error.message || 'Erro desconhecido'}. Verifique o console.`);
     } finally {
       setIsImporting(false);
       setImportProgress(0);
@@ -1021,31 +1086,44 @@ const AdminDashboard = () => {
       const totalFiles = files.length;
       let processedFiles = 0;
 
-      for (const filename of files) {
-        console.log(`Processing file: ${filename}`);
+      // Mapa para busca rápida de produtos (O(1) em vez de O(N))
+      const productMap = new Map<string, any>();
+      products.forEach(p => {
+        if (p.code) productMap.set(p.code.toString().trim(), p);
+        if (p.name) productMap.set(p.name.toLowerCase().trim(), p);
+      });
+
+      for (let i = 0; i < files.length; i++) {
+        const filename = files[i];
         const fileData = await zip.files[filename].async('blob');
         const storageRef = ref(storage, `products/${filename}`);
         
-        console.log(`Uploading: ${filename}`);
         await uploadBytes(storageRef, fileData);
         const downloadURL = await getDownloadURL(storageRef);
-        console.log(`Uploaded: ${filename}, URL: ${downloadURL}`);
 
         // Tenta encontrar o produto pelo nome do arquivo (sem extensão)
-        const productName = filename.split('.')[0];
+        const productName = filename.split('.')[0].trim();
         const paddedName = productName.padStart(6, '0');
-        const product = products.find(p => p.name.toLowerCase() === productName.toLowerCase() || p.code === productName || p.code === paddedName);
+        
+        const product = productMap.get(productName) || productMap.get(productName.toLowerCase()) || productMap.get(paddedName);
 
         if (product) {
-          console.log(`Updating product: ${product.id}`);
+          const currentImages = Array.isArray(product.images) ? product.images : [];
+          const newImages = currentImages.includes(downloadURL) ? currentImages : [...currentImages, downloadURL];
+          
           await updateDoc(doc(db, 'products', String(product.id)), {
-            images: [downloadURL]
+            image_url: currentImages.length === 0 ? downloadURL : (product.image_url || downloadURL),
+            images: newImages
           });
         }
 
         processedFiles++;
-        setImportProgress(Math.round((processedFiles / totalFiles) * 100));
-        setCurrentImportingProduct(`Processando: ${filename}`);
+        
+        // Atualiza UI apenas a cada 5 itens para não travar o browser
+        if (processedFiles % 5 === 0 || processedFiles === totalFiles) {
+          setImportProgress(Math.round((processedFiles / totalFiles) * 100));
+          setCurrentImportingProduct(`Processando: ${filename}`);
+        }
       }
 
       alert(`Upload de ${processedFiles} imagens concluído!`);
@@ -1070,44 +1148,7 @@ const AdminDashboard = () => {
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
 
-  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
-
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        navigate('/admin/login');
-      } else {
-        if (user.email === 'camillasites@gmail.com') {
-          setCurrentUserRole('admin');
-        } else {
-          try {
-            const userDoc = await getDocFromServer(doc(db, 'users', user.uid));
-            if (userDoc.exists()) {
-              setCurrentUserRole(userDoc.data().role as any);
-            } else {
-              setCurrentUserRole('viewer');
-            }
-          } catch (e) {
-            setCurrentUserRole('viewer');
-          }
-        }
-        fetchAll();
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const fetchAll = () => {
-    fetchProducts();
-    fetchCategories();
-    fetchSubcategories();
-    fetchUsers();
-    // fetchOrders(); // Orders collection
-    fetchFinancialStats(); // Calculate from orders
-    fetchSettings();
-  };
 
   const fetchUsers = async () => {
     try {
@@ -1204,6 +1245,96 @@ const AdminDashboard = () => {
       handleFirestoreError(error, OperationType.GET, 'subcategories');
     }
   };
+
+  const fetchAll = () => {
+    fetchProducts();
+    fetchCategories();
+    fetchSubcategories();
+    fetchUsers();
+    // fetchOrders(); // Orders collection
+    fetchFinancialStats(); // Calculate from orders
+    fetchSettings();
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log("AdminDashboard: Auth state changed", user?.email);
+      
+      if (!isMounted) return;
+
+      try {
+        if (!user) {
+          navigate('/admin/login');
+        } else {
+          if (user.email === 'camillasites@gmail.com') {
+            setCurrentUserRole('admin');
+          } else {
+            try {
+              // Use a timeout for the role check to prevent hanging
+              const rolePromise = getDoc(doc(db, 'users', user.uid));
+              const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Timeout")), 5000)
+              );
+              
+              const userDoc = await Promise.race([rolePromise, timeoutPromise]) as any;
+              if (userDoc && userDoc.exists()) {
+                setCurrentUserRole(userDoc.data().role as any);
+              } else {
+                setCurrentUserRole('viewer');
+              }
+            } catch (e) {
+              console.warn("Role check failed or timed out, defaulting to viewer:", e);
+              setCurrentUserRole('viewer');
+            }
+          }
+          
+          try {
+            fetchAll();
+          } catch (fetchErr) {
+            console.error("Error starting fetchAll:", fetchErr);
+          }
+        }
+      } catch (err) {
+        console.error("AdminDashboard auth error:", err);
+      } finally {
+        if (isMounted) {
+          setIsAuthLoading(false);
+          console.log("AdminDashboard: Loading finished");
+        }
+      }
+    });
+
+    // Fallback timer: force hide loading after 10 seconds no matter what
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted && isAuthLoading) {
+        console.warn("AdminDashboard: Auth loading fallback triggered");
+        setIsAuthLoading(false);
+      }
+    }, 10000);
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+      clearTimeout(fallbackTimer);
+    };
+  }, []);
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-white/60 font-serif italic">Verificando permissões...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!auth.currentUser) {
+    return null;
+  }
 
   const handleDelete = async () => {
     if (productToDelete) {
@@ -1304,7 +1435,7 @@ const AdminDashboard = () => {
         const { initializeApp } = await import('firebase/app');
         const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
         
-        const secondaryApp = initializeApp(finalConfig, "Secondary");
+        const secondaryApp = initializeApp(firebaseConfig, "Secondary");
         const secondaryAuth = getAuth(secondaryApp);
         
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, editingUser.email, editingUser.password);
@@ -1446,7 +1577,16 @@ const AdminDashboard = () => {
         </nav>
         <div className="p-4 border-t border-white/10">
           <button 
-            onClick={() => { localStorage.removeItem('admin_user'); navigate('/admin/login'); }}
+            onClick={async () => { 
+              try {
+                await signOut(auth);
+                navigate('/admin/login'); 
+              } catch (error) {
+                console.error("Error signing out:", error);
+                // Fallback navigation
+                navigate('/admin/login');
+              }
+            }}
             className="flex items-center gap-3 p-4 w-full text-red-400 hover:bg-red-400/10 rounded-xl transition-all"
           >
             <LogOut size={20} /> Sair
@@ -1593,6 +1733,7 @@ const AdminDashboard = () => {
               <table className="w-full text-left">
                 <thead className="bg-neutral-50 border-b">
                   <tr>
+                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">CÓDIGO</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">BARRAS</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Produto</th>
                     <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Preço</th>
@@ -1603,7 +1744,8 @@ const AdminDashboard = () => {
                 <tbody className="divide-y">
                   {products.slice((currentProductPage - 1) * productsPerPage, currentProductPage * productsPerPage).map(product => (
                     <tr key={product.id} className={`hover:bg-neutral-50 transition-colors ${(product.active === 0 || product.active === false) ? 'opacity-50' : ''}`}>
-                      <td className="p-6 text-black/60">{product.code ? String(product.code).padStart(6, '0') : '-'}</td>
+                      <td className="p-6 text-black/60 font-medium">{product.code ? String(product.code).padStart(6, '0') : '-'}</td>
+                      <td className="p-6 text-black/40 text-xs font-mono">{product.barcode || '-'}</td>
                       <td className="p-6">
                         <div className="flex items-center gap-4">
                           <img src={product.image_url} className="w-12 h-12 rounded-lg object-cover" referrerPolicy="no-referrer" />
@@ -2326,12 +2468,21 @@ const AdminDashboard = () => {
                     required 
                   />
                 </div>
-                <div className="col-span-2 flex flex-col gap-2">
+                <div className="flex flex-col gap-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-black/40">Código do Produto</label>
                   <input 
                     type="text" 
                     value={editingProduct?.code || ''}
                     onChange={e => setEditingProduct({...editingProduct, code: e.target.value})}
+                    className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-black/40">Código de Barras</label>
+                  <input 
+                    type="text" 
+                    value={editingProduct?.barcode || ''}
+                    onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})}
                     className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
                   />
                 </div>
@@ -2731,17 +2882,21 @@ const AdminDashboard = () => {
                 </div>
 
                 {isImporting && (
-                  <div className="mb-6">
-                    <div className="flex justify-between text-sm font-bold mb-2">
-                      <span>Importando: {currentImportingProduct}</span>
-                      <span>{importProgress}%</span>
+                  <div className="mb-6 p-6 bg-black text-white rounded-3xl shadow-xl">
+                    <div className="flex justify-between text-sm font-bold mb-4">
+                      <span className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                        {currentImportingProduct}
+                      </span>
+                      <span className="text-primary">{importProgress}%</span>
                     </div>
-                    <div className="w-full bg-neutral-100 rounded-full h-2.5 overflow-hidden">
+                    <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden">
                       <div 
-                        className="bg-black h-2.5 rounded-full transition-all duration-300" 
+                        className="bg-primary h-3 rounded-full transition-all duration-300 shadow-[0_0_10px_rgba(var(--primary-rgb),0.5)]" 
                         style={{ width: `${importProgress}%` }}
                       ></div>
                     </div>
+                    <p className="text-[10px] text-white/40 mt-4 uppercase tracking-widest font-bold">Por favor, não feche esta janela até concluir.</p>
                   </div>
                 )}
 

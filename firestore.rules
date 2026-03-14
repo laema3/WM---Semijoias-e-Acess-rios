@@ -15,13 +15,17 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "camillasites@gmail.com" && request.auth.token.email_verified == true));
+        (request.auth.token.email == "camillasites@gmail.com" || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
     function isEditor() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor' || isAdmin());
+        (request.auth.token.email == "camillasites@gmail.com" ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor' || 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')));
     }
 
     function hasOnlyAllowedFields(fields) {
@@ -32,14 +36,14 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidProduct(data) {
-      return hasOnlyAllowedFields(['name', 'price', 'category', 'image_url', 'featured', 'best_seller', 'variations', 'active', 'description', 'code', 'category_id', 'subcategory_id', 'created_at']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.price is number && data.price > 0;
+      return hasOnlyAllowedFields(['name', 'price', 'cost_price', 'category', 'image_url', 'featured', 'best_seller', 'variations', 'active', 'description', 'code', 'barcode', 'category_id', 'subcategory_id', 'created_at', 'stock', 'supplier', 'images']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 500 &&
+             data.price is number && data.price >= 0;
     }
 
     function isValidCategory(data) {
       return hasOnlyAllowedFields(['name', 'created_at']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 50;
+             data.name is string && data.name.size() > 0 && data.name.size() < 200;
     }
 
     function isValidUser(data) {
@@ -74,7 +78,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAdmin() && isValidUser(request.resource.data);
+      allow create: if (isOwner(userId) && (request.resource.data.role == 'viewer' || request.auth.token.email == "camillasites@gmail.com")) || isAdmin();
       allow update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
       allow delete: if isAdmin();
     }
