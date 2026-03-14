@@ -915,7 +915,20 @@ const AdminDashboard = () => {
   };
 
   const [currentProductPage, setCurrentProductPage] = useState(1);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
   const productsPerPage = 20;
+
+  let filteredAdminProducts = products;
+  if (productSearchQuery.trim() !== '') {
+    const query = productSearchQuery.toLowerCase().trim();
+    filteredAdminProducts = products.filter(p => 
+      p.name?.toLowerCase().includes(query) || 
+      String(p.code || '').includes(query) || 
+      String(p.barcode || '').includes(query)
+    );
+  }
+
+  const totalAdminProductPages = Math.ceil(filteredAdminProducts.length / productsPerPage);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1116,11 +1129,42 @@ const AdminDashboard = () => {
             await uploadBytes(storageRef, fileData);
             const downloadURL = await getDownloadURL(storageRef);
 
-            // Tenta encontrar o produto pelo nome do arquivo (sem extensão)
-            const productName = filename.split('.')[0].trim();
-            const paddedName = productName.padStart(6, '0');
+            // Tenta encontrar o produto pelo nome do arquivo
+            const baseFilename = filename.split('/').pop() || filename; // Remove caminhos de pasta se houver
+            const nameWithoutExt = baseFilename.includes('.') ? baseFilename.substring(0, baseFilename.lastIndexOf('.')) : baseFilename; // Remove extensão
             
-            const product = productMap.get(productName) || productMap.get(productName.toLowerCase()) || productMap.get(paddedName);
+            // Lógica específica baseada no formato da planilha:
+            // O formato é "CODIGO_IDFOTO_produto.jpg" (ex: "486_1000_produto.jpg")
+            // O código do produto é sempre a primeira parte antes do primeiro underline.
+            const productCode = nameWithoutExt.split('_')[0].trim();
+
+            // Tenta encontrar o produto pelo código extraído de várias formas:
+            // 1. Código exato (ex: "486")
+            // 2. Código com preenchimento de zeros à esquerda até 6 dígitos (ex: "000486")
+            // 3. Código com preenchimento de zeros à esquerda até 5 dígitos (ex: "00486")
+            // 4. Código com preenchimento de zeros à esquerda até 4 dígitos (ex: "0486")
+            const paddedCode6 = productCode.padStart(6, '0');
+            const paddedCode5 = productCode.padStart(5, '0');
+            const paddedCode4 = productCode.padStart(4, '0');
+
+            let product = productMap.get(productCode) || 
+                          productMap.get(productCode.toLowerCase()) || 
+                          productMap.get(paddedCode6) ||
+                          productMap.get(paddedCode5) ||
+                          productMap.get(paddedCode4);
+
+            // Fallback: se não encontrar pelo código, tenta outras variações
+            if (!product) {
+              const possibleKeys = [
+                nameWithoutExt.trim(),
+                nameWithoutExt.split('-')[0].trim(),
+                nameWithoutExt.split(' ')[0].trim()
+              ];
+              for (const key of possibleKeys) {
+                product = productMap.get(key) || productMap.get(key.toLowerCase());
+                if (product) break;
+              }
+            }
 
             if (product) {
               const currentImages = Array.isArray(product.images) ? product.images : [];
@@ -1717,51 +1761,67 @@ const AdminDashboard = () => {
 
           {activeTab === 'products' && (
             <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
-              <div className="p-6 border-b flex justify-between items-center">
+              <div className="p-6 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <h3 className="font-bold">Lista de Produtos</h3>
-                {currentUserRole !== 'viewer' && (
-                  <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black/40" size={16} />
                     <input 
-                      type="file" 
-                      accept=".zip" 
-                      onChange={handleZipUpload} 
-                      className="hidden" 
-                      id="zip-upload"
+                      type="text" 
+                      placeholder="Buscar por nome, código..." 
+                      value={productSearchQuery}
+                      onChange={(e) => {
+                        setProductSearchQuery(e.target.value);
+                        setCurrentProductPage(1);
+                      }}
+                      className="w-full pl-9 pr-4 py-2 bg-neutral-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none transition-all"
                     />
-                    <label 
-                      htmlFor="zip-upload"
-                      className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all cursor-pointer"
-                    >
-                      <Upload size={16} /> Fotos (ZIP)
-                    </label>
-                    <button 
-                      onClick={() => setIsImportModalOpen(true)}
-                      className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all"
-                    >
-                      <Upload size={16} /> Importar
-                    </button>
-                    <button 
-                      onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
-                      className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
-                    >
-                      <Plus size={16} /> Adicionar
-                    </button>
                   </div>
-                )}
+                  {currentUserRole !== 'viewer' && (
+                    <div className="flex gap-2">
+                      <input 
+                        type="file" 
+                        accept=".zip" 
+                        onChange={handleZipUpload} 
+                        className="hidden" 
+                        id="zip-upload"
+                      />
+                      <label 
+                        htmlFor="zip-upload"
+                        className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        <Upload size={16} /> Fotos (ZIP)
+                      </label>
+                      <button 
+                        onClick={() => setIsImportModalOpen(true)}
+                        className="bg-neutral-100 text-black px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-neutral-200 transition-all whitespace-nowrap"
+                      >
+                        <Upload size={16} /> Importar
+                      </button>
+                      <button 
+                        onClick={() => { setEditingProduct({}); setIsModalOpen(true); }}
+                        className="bg-black text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 whitespace-nowrap"
+                      >
+                        <Plus size={16} /> Adicionar
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-              <table className="w-full text-left">
-                <thead className="bg-neutral-50 border-b">
-                  <tr>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">CÓDIGO</th>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">BARRAS</th>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Produto</th>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Preço</th>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Status</th>
-                    <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {products.slice((currentProductPage - 1) * productsPerPage, currentProductPage * productsPerPage).map(product => (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left min-w-[800px]">
+                  <thead className="bg-neutral-50 border-b">
+                    <tr>
+                      <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">CÓDIGO</th>
+                      <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">BARRAS</th>
+                      <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Produto</th>
+                      <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Preço</th>
+                      <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40">Status</th>
+                      <th className="p-6 font-bold uppercase text-xs tracking-widest text-black/40 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredAdminProducts.slice((currentProductPage - 1) * productsPerPage, currentProductPage * productsPerPage).map(product => (
                     <tr key={product.id} className={`hover:bg-neutral-50 transition-colors ${(product.active === 0 || product.active === false) ? 'opacity-50' : ''}`}>
                       <td className="p-6 text-black/60 font-medium">{product.code ? String(product.code).padStart(6, '0') : '-'}</td>
                       <td className="p-6 text-black/40 text-xs font-mono">{product.barcode || '-'}</td>
@@ -1816,12 +1876,13 @@ const AdminDashboard = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
               
               {/* Pagination Controls */}
-              {products.length > productsPerPage && (
+              {filteredAdminProducts.length > productsPerPage && (
                 <div className="p-6 border-t flex items-center justify-between bg-neutral-50">
                   <div className="text-sm text-black/60 font-medium">
-                    Mostrando {(currentProductPage - 1) * productsPerPage + 1} a {Math.min(currentProductPage * productsPerPage, products.length)} de {products.length} produtos
+                    Mostrando {(currentProductPage - 1) * productsPerPage + 1} a {Math.min(currentProductPage * productsPerPage, filteredAdminProducts.length)} de {filteredAdminProducts.length} produtos
                   </div>
                   <div className="flex gap-2">
                     <button 
@@ -1832,8 +1893,8 @@ const AdminDashboard = () => {
                       Anterior
                     </button>
                     <button 
-                      onClick={() => setCurrentProductPage(prev => Math.min(prev + 1, Math.ceil(products.length / productsPerPage)))}
-                      disabled={currentProductPage === Math.ceil(products.length / productsPerPage)}
+                      onClick={() => setCurrentProductPage(prev => Math.min(prev + 1, totalAdminProductPages))}
+                      disabled={currentProductPage === totalAdminProductPages}
                       className="px-4 py-2 rounded-xl border bg-white text-sm font-bold disabled:opacity-50 hover:bg-neutral-100 transition-colors"
                     >
                       Próxima
@@ -3053,15 +3114,25 @@ export default function App() {
 const Shop = ({ products, categories, onAddToCart, settings }: { products: Product[], categories: Category[], onAddToCart: (p: Product) => void, settings: any }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
   const productsPerPage = 12;
 
-  const filteredProducts = selectedCategory === 'Todos' 
+  let filteredProducts = selectedCategory === 'Todos' 
     ? products 
     : products.filter(p => p.category_id === selectedCategory || (p as any).category === categories.find(c => c.id === selectedCategory)?.name);
 
+  if (searchQuery.trim() !== '') {
+    const query = searchQuery.toLowerCase().trim();
+    filteredProducts = filteredProducts.filter(p => 
+      p.name?.toLowerCase().includes(query) || 
+      String(p.code || '').includes(query) || 
+      String(p.barcode || '').includes(query)
+    );
+  }
+
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedCategory]);
+  }, [selectedCategory, searchQuery]);
 
   const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
   const currentProducts = filteredProducts.slice((currentPage - 1) * productsPerPage, currentPage * productsPerPage);
@@ -3093,9 +3164,21 @@ const Shop = ({ products, categories, onAddToCart, settings }: { products: Produ
           </ul>
         </aside>
         <div className="flex-1">
-          <h1 className="text-4xl font-serif font-bold mb-12">Nossa Loja</h1>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
+            <h1 className="text-4xl font-serif font-bold">Nossa Loja</h1>
+            <div className="relative w-full md:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black/40" size={20} />
+              <input 
+                type="text" 
+                placeholder="Buscar produtos..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 bg-neutral-100 border-none rounded-xl focus:ring-2 focus:ring-primary outline-none transition-all"
+              />
+            </div>
+          </div>
           {filteredProducts.length === 0 ? (
-            <p className="text-black/60">Nenhum produto encontrado nesta categoria.</p>
+            <p className="text-black/60">Nenhum produto encontrado.</p>
           ) : (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
