@@ -269,7 +269,7 @@ const ProductCard = ({ product, onAddToCart }: { product: Product, onAddToCart: 
       <div className="p-5 flex-1 flex flex-col">
         <h3 className="text-sm font-medium text-black/60 uppercase tracking-wider mb-1">{product.category || 'Semi Joia'}</h3>
         <h2 className="text-lg font-serif font-bold mb-2 flex-1 line-clamp-2">{product.name}</h2>
-        <p className="text-xl font-bold text-primary drop-shadow-sm mt-auto">
+        <p className="text-xl font-bold text-red-600 mt-auto">
           R$ {product.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
         </p>
       </div>
@@ -529,7 +529,7 @@ const ProductDetail = ({ products, onAddToCart }: { products: Product[], onAddTo
           <h3 className="text-primary font-bold uppercase tracking-widest mb-4">Semi Joia Premium</h3>
           <h1 className="text-5xl font-serif font-bold mb-2">{product.name}</h1>
           {product.code && <p className="text-xs font-bold text-black/40 uppercase tracking-widest mb-6">Cód: {String(product.code).padStart(6, '0')}</p>}
-          <p className="text-3xl font-bold text-primary mb-8">R$ {product.price.toLocaleString('pt-BR')}</p>
+          <p className="text-3xl font-bold text-red-600 mb-8">R$ {product.price.toLocaleString('pt-BR')}</p>
           <p className="text-black/60 leading-relaxed mb-10">{product.description}</p>
 
           {variationKey && (
@@ -587,7 +587,7 @@ const ProductDetail = ({ products, onAddToCart }: { products: Product[], onAddTo
                         <div className="text-[10px] text-black/40 uppercase font-bold">{option.delivery_range.min}-{option.delivery_range.max} dias úteis</div>
                       </div>
                     </div>
-                    <div className="font-bold text-primary">R$ {parseFloat(option.price).toLocaleString('pt-BR')}</div>
+                    <div className="font-bold text-red-600">R$ {parseFloat(option.price).toLocaleString('pt-BR')}</div>
                   </div>
                 ))}
               </div>
@@ -1846,7 +1846,7 @@ const AdminDashboard = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="p-6 font-medium">R$ {product.price.toLocaleString('pt-BR')}</td>
+                      <td className="p-6 font-medium text-red-600">R$ {product.price.toLocaleString('pt-BR')}</td>
                       <td className="p-6">
                         <div className="flex gap-2">
                           {(product.active === 0 || product.active === false) && <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded">Inativo</span>}
@@ -3497,7 +3497,7 @@ function AppContent() {
                           <div className="flex-1">
                             <h3 className="font-bold">{item.name}</h3>
                             <p className="text-sm text-black/60">Qtd: {item.quantity}</p>
-                            <p className="text-primary font-bold">R$ {(item.price * item.quantity).toLocaleString('pt-BR')}</p>
+                            <p className="text-red-600 font-bold">R$ {(item.price * item.quantity).toLocaleString('pt-BR')}</p>
                           </div>
                         </div>
                       ))}
@@ -3507,7 +3507,7 @@ function AppContent() {
                 <div className="p-6 border-t bg-neutral-50">
                   <div className="flex justify-between mb-6">
                     <span className="font-bold text-lg">Total</span>
-                    <span className="font-bold text-lg text-primary">
+                    <span className="font-bold text-lg text-red-600">
                       R$ {cart.reduce((acc, item) => acc + (item.price * item.quantity), 0).toLocaleString('pt-BR')}
                     </span>
                   </div>
