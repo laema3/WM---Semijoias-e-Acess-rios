@@ -341,7 +341,7 @@ const Home = ({ products, onAddToCart, settings }: { products: Product[], onAddT
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
-      <section className="relative h-screen flex items-center justify-center overflow-hidden bg-black">
+      <section className="relative h-[50vh] flex items-center justify-center overflow-hidden bg-black">
         <div className="absolute inset-0 opacity-50">
           <img 
             src={settings?.banner_image || "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&q=80&w=2070"} 
