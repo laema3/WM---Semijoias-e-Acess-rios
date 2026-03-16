@@ -1146,9 +1146,10 @@ const AdminDashboard = () => {
             const nameWithoutExt = baseFilename.includes('.') ? baseFilename.substring(0, baseFilename.lastIndexOf('.')) : baseFilename; // Remove extensão
             
             // Lógica específica baseada no formato da planilha:
-            // O formato é "CODIGO_IDFOTO_produto.jpg" (ex: "486_1000_produto.jpg")
-            // O código do produto é sempre a primeira parte antes do primeiro underline.
-            const productCode = nameWithoutExt.split('_')[0].trim();
+            // O formato é "486_CODIGO_..." (ex: "486_1234_produto.jpg")
+            // O código do produto está na segunda parte (índice 1).
+            const parts = nameWithoutExt.split('_');
+            const productCode = parts.length > 1 ? parts[1].trim() : nameWithoutExt.split('_')[0].trim();
             const productCodeWithoutZeros = productCode.replace(/^0+/, ''); // Remove zeros à esquerda
             
             // Tenta encontrar o produto pelo código extraído de várias formas:
