@@ -177,6 +177,28 @@ const InstallPrompt = () => {
   );
 };
 
+const MobileMenu = ({ onClose }: { onClose: () => void }) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, x: '100%' }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: '100%' }}
+      className="fixed inset-0 bg-black z-[60] p-6 flex flex-col"
+    >
+      <div className="flex justify-end mb-12">
+        <button onClick={onClose} className="text-white">
+          <X size={32} />
+        </button>
+      </div>
+      <nav className="flex flex-col gap-8">
+        <Link to="/" onClick={onClose} className="text-3xl font-serif font-bold text-white hover:text-primary transition-colors">Início</Link>
+        <Link to="/shop" onClick={onClose} className="text-3xl font-serif font-bold text-white hover:text-primary transition-colors">Loja</Link>
+        <Link to="/contact" onClick={onClose} className="text-3xl font-serif font-bold text-white hover:text-primary transition-colors">Contato</Link>
+      </nav>
+    </motion.div>
+  );
+};
+
 const Header = ({ cartCount, onOpenCart, logoUrl }: { cartCount: number, onOpenCart: () => void, logoUrl?: string }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -189,46 +211,51 @@ const Header = ({ cartCount, onOpenCart, logoUrl }: { cartCount: number, onOpenC
   }, []);
 
   return (
-    <header className={`fixed top-0 left-0 w-full z-50 transition-all duration-300 ${isScrolled ? 'bg-black py-3 shadow-lg' : 'bg-transparent py-6'}`}>
-      <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
-        <div className="flex items-center gap-8">
-          <button className="lg:hidden text-primary" onClick={() => setIsMenuOpen(true)}>
-            <Menu size={24} />
-          </button>
-          <Link to="/" className="flex items-center">
-            {logoUrl ? (
-              <img src={logoUrl} alt="Logo" className="h-10 object-contain" />
-            ) : (
-              <div className="text-2xl font-serif font-bold tracking-tighter text-primary">
-                WM <span className="text-white">SEMIJOIAS</span>
-              </div>
-            )}
-          </Link>
-          <nav className="hidden lg:flex items-center gap-6">
-            <Link to="/" className="text-sm font-medium text-white/80 hover:text-primary transition-colors uppercase tracking-widest">Início</Link>
-            <Link to="/shop" className="text-sm font-medium text-white/80 hover:text-primary transition-colors uppercase tracking-widest">Loja</Link>
-            <Link to="/contact" className="text-sm font-medium text-white/80 hover:text-primary transition-colors uppercase tracking-widest">Contato</Link>
-          </nav>
-        </div>
+    <>
+      <header className={`fixed top-0 left-0 w-full z-50 transition-all duration-300 ${isScrolled ? 'bg-black py-3 shadow-lg' : 'bg-transparent py-6'}`}>
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
+          <div className="flex items-center gap-8">
+            <button className="lg:hidden text-primary" onClick={() => setIsMenuOpen(true)}>
+              <Menu size={24} />
+            </button>
+            <Link to="/" className="flex items-center">
+              {logoUrl ? (
+                <img src={logoUrl} alt="Logo" className="h-10 object-contain" />
+              ) : (
+                <div className="text-2xl font-serif font-bold tracking-tighter text-primary">
+                  WM <span className="text-white">SEMIJOIAS</span>
+                </div>
+              )}
+            </Link>
+            <nav className="hidden lg:flex items-center gap-6">
+              <Link to="/" className="text-sm font-medium text-white/80 hover:text-primary transition-colors uppercase tracking-widest">Início</Link>
+              <Link to="/shop" className="text-sm font-medium text-white/80 hover:text-primary transition-colors uppercase tracking-widest">Loja</Link>
+              <Link to="/contact" className="text-sm font-medium text-white/80 hover:text-primary transition-colors uppercase tracking-widest">Contato</Link>
+            </nav>
+          </div>
 
-        <div className="flex items-center gap-5">
-          <button className="text-white hover:text-primary transition-colors">
-            <Search size={20} />
-          </button>
-          <button onClick={() => navigate('/admin/login')} className="text-white hover:text-primary transition-colors">
-            <User size={20} />
-          </button>
-          <button onClick={onOpenCart} className="relative text-white hover:text-primary transition-colors">
-            <ShoppingBag size={20} />
-            {cartCount > 0 && (
-              <span className="absolute -top-2 -right-2 bg-primary text-black text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                {cartCount}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-5">
+            <button className="text-white hover:text-primary transition-colors">
+              <Search size={20} />
+            </button>
+            <button onClick={() => navigate('/admin/login')} className="text-white hover:text-primary transition-colors">
+              <User size={20} />
+            </button>
+            <button onClick={onOpenCart} className="relative text-white hover:text-primary transition-colors">
+              <ShoppingBag size={20} />
+              {cartCount > 0 && (
+                <span className="absolute -top-2 -right-2 bg-primary text-black text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+      <AnimatePresence>
+        {isMenuOpen && <MobileMenu onClose={() => setIsMenuOpen(false)} />}
+      </AnimatePresence>
+    </>
   );
 };
 
