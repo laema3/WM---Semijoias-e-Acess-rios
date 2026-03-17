@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, MessageSquare, Bot, Plus, Edit2, Trash2, ChevronRight, LayoutDashboard, Package, Users, Settings, LogOut, BarChart3, CreditCard, Layers, Tag, DollarSign, Wallet, Zap, Truck, Smartphone, Share2, Upload, Eye, EyeOff, Gem } from 'lucide-react';
+import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, MessageSquare, Bot, Plus, Edit2, Trash2, ChevronRight, LayoutDashboard, Package, Users, Settings, LogOut, BarChart3, CreditCard, Layers, Tag, DollarSign, Wallet, Zap, Truck, Smartphone, Share2, Upload, Eye, EyeOff, Gem, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Category, Subcategory, User as UserType } from './types';
 import AIAgent from './components/AIAgent';
@@ -450,11 +450,7 @@ const Home = ({ products, onAddToCart, settings }: { products: Product[], onAddT
             <p className="text-white/60 text-lg mb-10 leading-relaxed">
               Nossas peças são banhadas com tecnologia de ponta, garantindo durabilidade e um brilho incomparável. Descubra a perfeição em cada detalhe.
             </p>
-            <div className="grid grid-cols-2 gap-8">
-              <div>
-                <h4 className="text-primary font-bold text-3xl mb-2">1 ano</h4>
-                <p className="text-white/40 uppercase text-xs tracking-widest">Garantia Total</p>
-              </div>
+            <div className="grid grid-cols-1 gap-8">
               <div>
                 <h4 className="text-primary font-bold text-3xl mb-2">100%</h4>
                 <p className="text-white/40 uppercase text-xs tracking-widest">Hipoalergênico</p>
@@ -895,7 +891,13 @@ const AdminDashboard = () => {
   
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
+  
+  useEffect(() => {
+    console.log("currentUserRole changed:", currentUserRole);
+  }, [currentUserRole]);
+
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isUploadingSettingsImage, setIsUploadingSettingsImage] = useState<string | null>(null);
   
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -912,6 +914,25 @@ const AdminDashboard = () => {
         alert("Erro ao fazer upload da imagem.");
       } finally {
         setIsUploadingImage(false);
+      }
+    }
+  };
+
+  const handleSettingsImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, key: string) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setIsUploadingSettingsImage(key);
+      try {
+        const filename = `${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, `settings/${filename}`);
+        await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(storageRef);
+        setSettings(prev => ({ ...prev, [key]: downloadURL }));
+      } catch (error) {
+        console.error("Erro ao fazer upload da imagem:", error);
+        alert("Erro ao fazer upload da imagem.");
+      } finally {
+        setIsUploadingSettingsImage(null);
       }
     }
   };
@@ -1253,15 +1274,17 @@ const AdminDashboard = () => {
 
   const navigate = useNavigate();
 
-  const fetchUsers = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, 'users'));
-      const usersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as UserType[];
+  useEffect(() => {
+    const q = collection(db, 'users');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as UserType[];
       setUsers(usersData);
-    } catch (error) {
+    }, (error) => {
+      console.error('Error fetching users:', error);
       handleFirestoreError(error, OperationType.GET, 'users');
-    }
-  };
+    });
+    return unsubscribe;
+  }, []);
 
   const fetchFinancialStats = async () => {
     try {
@@ -1353,9 +1376,6 @@ const AdminDashboard = () => {
     fetchProducts();
     fetchCategories();
     fetchSubcategories();
-    fetchUsers();
-    // fetchOrders(); // Orders collection
-    fetchFinancialStats(); // Calculate from orders
     fetchSettings();
   };
 
@@ -1385,6 +1405,14 @@ const AdminDashboard = () => {
               if (userDoc && userDoc.exists()) {
                 setCurrentUserRole(userDoc.data().role as any);
               } else {
+                // Create document if it doesn't exist
+                const newUserDoc = {
+                  email: user.email,
+                  role: 'viewer',
+                  name: user.displayName || 'Usuário',
+                  created_at: new Date().toISOString()
+                };
+                await setDoc(doc(db, 'users', user.uid), newUserDoc);
                 setCurrentUserRole('viewer');
               }
             } catch (e) {
@@ -1542,6 +1570,7 @@ const AdminDashboard = () => {
         const secondaryAuth = getAuth(secondaryApp);
         
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, editingUser.email, editingUser.password);
+        console.log('User created with UID:', userCredential.user.uid);
         
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           email: editingUser.email,
@@ -1549,11 +1578,11 @@ const AdminDashboard = () => {
           name: editingUser.name,
           created_at: new Date().toISOString()
         });
+        console.log('User document created in Firestore');
         
         await signOut(secondaryAuth);
       }
       setIsUserModalOpen(false);
-      fetchUsers();
     } catch (error: any) {
       alert('Erro ao salvar usuário: ' + error.message);
     }
@@ -1562,7 +1591,6 @@ const AdminDashboard = () => {
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
-      fetchUsers();
     } catch (error) {
       alert('Erro ao atualizar permissão. Apenas administradores podem fazer isso.');
     }
@@ -1902,7 +1930,7 @@ const AdminDashboard = () => {
                               </button>
                             </>
                           )}
-                          {currentUserRole === 'admin' && (
+                          {(currentUserRole === 'admin' || currentUserRole === 'editor') && (
                             <button 
                               onClick={() => { setProductToDelete(String(product.id)); setIsConfirmOpen(true); }}
                               className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
@@ -1981,7 +2009,7 @@ const AdminDashboard = () => {
                               <Edit2 size={18} />
                             </button>
                           )}
-                          {currentUserRole === 'admin' && (
+                          {(currentUserRole === 'admin' || currentUserRole === 'editor') && (
                             <button 
                               onClick={() => {
                                 if (window.confirm('Excluir esta categoria?')) {
@@ -2043,7 +2071,7 @@ const AdminDashboard = () => {
                               <Edit2 size={18} />
                             </button>
                           )}
-                          {currentUserRole === 'admin' && (
+                          {(currentUserRole === 'admin' || currentUserRole === 'editor') && (
                             <button 
                               onClick={() => {
                                 if (window.confirm('Excluir esta subcategoria?')) {
@@ -2307,24 +2335,68 @@ const AdminDashboard = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-black/40">Imagem do Banner (URL)</label>
-                    <input 
-                      type="text" 
-                      value={settings.banner_image || ''}
-                      onChange={e => setSettings({...settings, banner_image: e.target.value})}
-                      className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
-                    />
+                    <label className="text-xs font-bold uppercase tracking-widest text-black/40">Imagem do Banner</label>
+                    <div className="flex flex-col gap-4">
+                      {settings.banner_image && (
+                        <div className="relative w-full h-32 rounded-xl overflow-hidden bg-neutral-100">
+                          <img src={settings.banner_image} alt="Banner Preview" className="w-full h-full object-cover" />
+                          <button 
+                            type="button"
+                            onClick={() => setSettings({...settings, banner_image: ''})}
+                            className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-4">
+                        <input 
+                          type="text" 
+                          value={settings.banner_image || ''}
+                          onChange={e => setSettings({...settings, banner_image: e.target.value})}
+                          className="flex-1 p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
+                          placeholder="URL da imagem..."
+                        />
+                        <label className="cursor-pointer bg-black text-white p-4 rounded-xl hover:bg-primary hover:text-black transition-all flex items-center gap-2">
+                          {isUploadingSettingsImage === 'banner_image' ? <Loader2 size={20} className="animate-spin" /> : <Upload size={20} />}
+                          <span className="hidden sm:inline">UPLOAD</span>
+                          <input type="file" className="hidden" accept="image/*" onChange={e => handleSettingsImageUpload(e, 'banner_image')} />
+                        </label>
+                      </div>
+                    </div>
                   </div>
                   
                   <h4 className="font-bold border-b pb-2 mt-4">Identidade</h4>
                   <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-black/40">URL da Logomarca</label>
-                    <input 
-                      type="text" 
-                      value={settings.logo_url || ''}
-                      onChange={e => setSettings({...settings, logo_url: e.target.value})}
-                      className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
-                    />
+                    <label className="text-xs font-bold uppercase tracking-widest text-black/40">Logomarca</label>
+                    <div className="flex flex-col gap-4">
+                      {settings.logo_url && (
+                        <div className="relative w-32 h-16 rounded-xl overflow-hidden bg-neutral-100 flex items-center justify-center p-2">
+                          <img src={settings.logo_url} alt="Logo Preview" className="max-w-full max-h-full object-contain" />
+                          <button 
+                            type="button"
+                            onClick={() => setSettings({...settings, logo_url: ''})}
+                            className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-4">
+                        <input 
+                          type="text" 
+                          value={settings.logo_url || ''}
+                          onChange={e => setSettings({...settings, logo_url: e.target.value})}
+                          className="flex-1 p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
+                          placeholder="URL da logomarca..."
+                        />
+                        <label className="cursor-pointer bg-black text-white p-4 rounded-xl hover:bg-primary hover:text-black transition-all flex items-center gap-2">
+                          {isUploadingSettingsImage === 'logo_url' ? <Loader2 size={20} className="animate-spin" /> : <Upload size={20} />}
+                          <span className="hidden sm:inline">UPLOAD</span>
+                          <input type="file" className="hidden" accept="image/*" onChange={e => handleSettingsImageUpload(e, 'logo_url')} />
+                        </label>
+                      </div>
+                    </div>
                   </div>
 
                   <h4 className="font-bold border-b pb-2 mt-8">Status da Loja</h4>
@@ -2459,7 +2531,6 @@ const AdminDashboard = () => {
                                 if (window.confirm('Excluir este usuário? O acesso dele será revogado.')) {
                                   try {
                                     await deleteDoc(doc(db, 'users', String(user.id)));
-                                    fetchUsers();
                                   } catch (error) {
                                     alert('Erro ao excluir usuário. Apenas administradores podem fazer isso.');
                                   }

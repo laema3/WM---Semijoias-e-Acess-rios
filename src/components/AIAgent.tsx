@@ -50,7 +50,6 @@ export default function AIAgent() {
           { role: 'user', parts: [{ text: `Você é o assistente virtual da WM SEMIJOIAS E ACESSÓRIOS. Uma loja de joias e semijoias de luxo. 
           Cores da marca: Amarelo e Preto.
           Produtos: Anéis, Brincos, Colares, Pulseiras.
-          Garantia: 1 ano.
           Diferenciais: Hipoalergênico, banho de alta qualidade.
           Localização: São Paulo, SP.
           Pergunta do cliente: ${userMessage}` }] }
