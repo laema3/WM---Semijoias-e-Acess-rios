@@ -265,7 +265,7 @@ const ProductCard = ({ product, onAddToCart }: { product: Product, onAddToCart: 
       whileHover={{ y: -10 }}
       className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all border border-black/5 flex flex-col h-full"
     >
-      <div className="relative aspect-square overflow-hidden bg-neutral-100 flex items-center justify-center">
+      <div className="relative w-32 h-32 sm:w-full sm:h-auto sm:aspect-square mx-auto overflow-hidden bg-neutral-100 flex items-center justify-center rounded-xl">
         {product.image_url ? (
           <img 
             src={product.image_url} 
@@ -275,8 +275,8 @@ const ProductCard = ({ product, onAddToCart }: { product: Product, onAddToCart: 
           />
         ) : (
           <div className="text-black/20 flex flex-col items-center gap-2">
-            <ShoppingBag size={48} />
-            <span className="text-xs font-bold uppercase tracking-widest">Sem Imagem</span>
+            <ShoppingBag size={32} />
+            <span className="text-[10px] font-bold uppercase tracking-widest">Sem Imagem</span>
           </div>
         )}
         <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
