@@ -1372,11 +1372,23 @@ const AdminDashboard = () => {
     }
   };
 
+  const fetchOrders = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'orders'));
+      const ordersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setOrders(ordersData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'orders');
+    }
+  };
+
   const fetchAll = () => {
     fetchProducts();
     fetchCategories();
     fetchSubcategories();
     fetchSettings();
+    fetchOrders();
+    fetchFinancialStats();
   };
 
   useEffect(() => {
@@ -1498,7 +1510,8 @@ const AdminDashboard = () => {
     e.preventDefault();
     try {
       if (editingCategory?.id) {
-        await updateDoc(doc(db, 'categories', String(editingCategory.id)), editingCategory);
+        const { id, ...data } = editingCategory;
+        await updateDoc(doc(db, 'categories', String(id)), data);
       } else {
         await addDoc(collection(db, 'categories'), { ...editingCategory, created_at: new Date().toISOString() });
       }
@@ -1528,7 +1541,8 @@ const AdminDashboard = () => {
     e.preventDefault();
     try {
       if (editingSubcategory?.id) {
-        await updateDoc(doc(db, 'subcategories', String(editingSubcategory.id)), editingSubcategory);
+        const { id, ...data } = editingSubcategory;
+        await updateDoc(doc(db, 'subcategories', String(id)), data);
       } else {
         await addDoc(collection(db, 'subcategories'), { ...editingSubcategory, created_at: new Date().toISOString() });
       }
@@ -2013,8 +2027,12 @@ const AdminDashboard = () => {
                             <button 
                               onClick={() => {
                                 if (window.confirm('Excluir esta categoria?')) {
-                                  setCatToDelete(String(cat.id));
-                                  handleDeleteCategory();
+                                  deleteDoc(doc(db, 'categories', String(cat.id))).then(() => {
+                                    fetchCategories();
+                                  }).catch(error => {
+                                    handleFirestoreError(error, OperationType.DELETE, `categories/${cat.id}`);
+                                    alert('Erro ao excluir categoria.');
+                                  });
                                 }
                               }}
                               className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
@@ -2075,8 +2093,12 @@ const AdminDashboard = () => {
                             <button 
                               onClick={() => {
                                 if (window.confirm('Excluir esta subcategoria?')) {
-                                  setSubToDelete(String(sub.id));
-                                  handleDeleteSubcategory();
+                                  deleteDoc(doc(db, 'subcategories', String(sub.id))).then(() => {
+                                    fetchSubcategories();
+                                  }).catch(error => {
+                                    handleFirestoreError(error, OperationType.DELETE, `subcategories/${sub.id}`);
+                                    alert('Erro ao excluir subcategoria.');
+                                  });
                                 }
                               }}
                               className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
