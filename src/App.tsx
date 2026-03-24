@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, MessageSquare, Bot, Plus, Edit2, Trash2, ChevronRight, LayoutDashboard, Package, Users, Settings, LogOut, BarChart3, CreditCard, Layers, Tag, DollarSign, Wallet, Zap, Truck, Smartphone, Share2, Upload, Eye, EyeOff, Gem, Loader2 } from 'lucide-react';
+import { ShoppingBag, User, Search, Menu, X, Instagram, Facebook, Phone, MessageSquare, Bot, Plus, Edit2, Trash2, ChevronRight, LayoutDashboard, Package, Users, Settings, LogOut, BarChart3, CreditCard, Layers, Tag, DollarSign, Wallet, Zap, Truck, Smartphone, Share2, Upload, Eye, EyeOff, Gem, Loader2, ChevronLeft, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, CartItem, Category, Subcategory, User as UserType } from './types';
 import AIAgent from './components/AIAgent';
@@ -11,6 +11,9 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordRe
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import firebaseConfig from '../firebase-applet-config.json';
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // --- Error Handling ---
 
@@ -364,45 +367,78 @@ const Footer = ({ settings }: { settings: any }) => (
 const Home = ({ products, onAddToCart, settings }: { products: Product[], onAddToCart: (p: Product) => void, settings: any }) => {
   const featuredProducts = products.filter(p => p.featured === 1 || p.featured === true);
   const bestSellers = products.filter(p => p.best_seller === 1 || p.best_seller === true);
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  const slides = settings?.banner_slides ? JSON.parse(settings.banner_slides) : [
+    {
+      image: settings?.banner_image || "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&q=80&w=2070",
+      title: settings?.banner_title || 'Brilhe com Exclusividade',
+      description: 'Nova Coleção ' + new Date().getFullYear()
+    }
+  ];
+
+  useEffect(() => {
+    if (slides.length > 1) {
+      const timer = setInterval(() => {
+        setCurrentSlide(prev => (prev + 1) % slides.length);
+      }, 5000);
+      return () => clearInterval(timer);
+    }
+  }, [slides.length]);
 
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
-      <section className="relative h-[50vh] flex items-center justify-center overflow-hidden bg-black">
-        <div className="absolute inset-0 opacity-50">
-          <img 
-            src={settings?.banner_image || "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&q=80&w=2070"} 
-            alt="Hero" 
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-        <div className="relative z-10 text-center px-4 max-w-4xl">
-          <motion.h3 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-primary font-bold tracking-[0.3em] uppercase mb-6"
+      <section className="relative h-[65vh] flex items-center justify-center overflow-hidden bg-black">
+        <AnimatePresence mode="wait">
+          <motion.div 
+            key={currentSlide}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.8 }}
+            className="absolute inset-0"
           >
-            Nova Coleção {new Date().getFullYear()}
-          </motion.h3>
-          <motion.h1 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="text-6xl md:text-8xl font-serif font-bold text-white mb-8 leading-tight"
-          >
-            {settings?.banner_title || 'Brilhe com Exclusividade'}
-          </motion.h1>
+            <div className="absolute inset-0 bg-black/40 z-10" />
+            <img 
+              src={slides[currentSlide]?.image} 
+              alt="Hero" 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          </motion.div>
+        </AnimatePresence>
+
+        <div className="relative z-20 text-center px-4 max-w-4xl">
           <motion.div
+            key={`content-${currentSlide}`}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
+            transition={{ duration: 0.5 }}
           >
+            <h3 className="text-primary font-bold tracking-[0.3em] uppercase mb-6">
+              {slides[currentSlide]?.description || ('Nova Coleção ' + new Date().getFullYear())}
+            </h3>
+            <h1 className="text-5xl md:text-7xl font-serif font-bold text-white mb-8 leading-tight">
+              {slides[currentSlide]?.title}
+            </h1>
             <Link to="/shop" className="bg-primary text-black font-bold px-10 py-4 rounded-full hover:bg-yellow-500 transition-all shadow-xl hover:shadow-primary/20 inline-block">
               VER PRODUTOS
             </Link>
           </motion.div>
         </div>
+
+        {slides.length > 1 && (
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-30 flex gap-2">
+            {slides.map((_: any, idx: number) => (
+              <button 
+                key={idx}
+                onClick={() => setCurrentSlide(idx)}
+                className={`w-3 h-3 rounded-full transition-all ${currentSlide === idx ? 'bg-primary w-8' : 'bg-white/30'}`}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Featured Products */}
@@ -898,6 +934,7 @@ const AdminDashboard = () => {
 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isUploadingSettingsImage, setIsUploadingSettingsImage] = useState<string | null>(null);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -918,16 +955,54 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleSettingsImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, key: string) => {
+  const generateBannerDescription = async (index: number, title: string) => {
+    if (!title) {
+      alert("Por favor, insira um título primeiro para gerar a descrição.");
+      return;
+    }
+    
+    setIsGeneratingAI(true);
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: `Crie uma frase curta e impactante de marketing (máximo 10 palavras) para um banner de uma loja de semijoias de luxo. O título do banner é "${title}". O tom deve ser elegante e sofisticado. Retorne apenas a frase.`,
+      });
+      
+      const text = response.text;
+      
+      const currentSlides = settings.banner_slides ? JSON.parse(settings.banner_slides) : [];
+      const updatedSlides = [...currentSlides];
+      if (!updatedSlides[index]) updatedSlides[index] = {};
+      updatedSlides[index].description = text?.trim() || '';
+      
+      setSettings({ ...settings, banner_slides: JSON.stringify(updatedSlides) });
+    } catch (error) {
+      console.error("Erro ao gerar descrição com IA:", error);
+      alert("Erro ao gerar descrição com IA. Verifique sua chave de API.");
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
+
+  const handleSettingsImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, key: string, slideIndex?: number) => {
     const file = e.target.files?.[0];
     if (file) {
-      setIsUploadingSettingsImage(key);
+      setIsUploadingSettingsImage(slideIndex !== undefined ? `${key}_${slideIndex}` : key);
       try {
         const filename = `${Date.now()}_${file.name}`;
         const storageRef = ref(storage, `settings/${filename}`);
         await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(storageRef);
-        setSettings(prev => ({ ...prev, [key]: downloadURL }));
+        
+        if (slideIndex !== undefined) {
+          const currentSlides = settings.banner_slides ? JSON.parse(settings.banner_slides) : [];
+          const updatedSlides = [...currentSlides];
+          if (!updatedSlides[slideIndex]) updatedSlides[slideIndex] = {};
+          updatedSlides[slideIndex].image = downloadURL;
+          setSettings(prev => ({ ...prev, banner_slides: JSON.stringify(updatedSlides) }));
+        } else {
+          setSettings(prev => ({ ...prev, [key]: downloadURL }));
+        }
       } catch (error) {
         console.error("Erro ao fazer upload da imagem:", error);
         alert("Erro ao fazer upload da imagem.");
@@ -2346,46 +2421,97 @@ const AdminDashboard = () => {
               </div>
               <form onSubmit={handleSaveSettings} className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="flex flex-col gap-6">
-                  <h4 className="font-bold border-b pb-2">Banner Inicial</h4>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-black/40">Título do Banner</label>
-                    <input 
-                      type="text" 
-                      value={settings.banner_title || ''}
-                      onChange={e => setSettings({...settings, banner_title: e.target.value})}
-                      className="w-full p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-black/40">Imagem do Banner</label>
-                    <div className="flex flex-col gap-4">
-                      {settings.banner_image && (
-                        <div className="relative w-full h-32 rounded-xl overflow-hidden bg-neutral-100">
-                          <img src={settings.banner_image} alt="Banner Preview" className="w-full h-full object-cover" />
-                          <button 
-                            type="button"
-                            onClick={() => setSettings({...settings, banner_image: ''})}
-                            className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
-                          >
-                            <X size={14} />
-                          </button>
+                  <h4 className="font-bold border-b pb-2">Banner Inicial (Slider - 5 Imagens)</h4>
+                  <div className="col-span-1 md:col-span-2 flex flex-col gap-8">
+                    {[0, 1, 2, 3, 4].map((idx) => {
+                      const currentSlides = settings.banner_slides ? JSON.parse(settings.banner_slides) : [];
+                      const slide = currentSlides[idx] || {};
+                      
+                      const updateSlide = (field: string, value: string) => {
+                        const updated = [...currentSlides];
+                        if (!updated[idx]) updated[idx] = {};
+                        updated[idx][field] = value;
+                        setSettings({ ...settings, banner_slides: JSON.stringify(updated) });
+                      };
+
+                      return (
+                        <div key={idx} className="bg-neutral-50 p-6 rounded-2xl border border-neutral-200">
+                          <h5 className="font-bold mb-4 text-sm uppercase tracking-widest text-black/40">Slide {idx + 1}</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="flex flex-col gap-4">
+                              <div className="flex flex-col gap-2">
+                                <label className="text-xs font-bold uppercase tracking-widest text-black/40">Título (Foto)</label>
+                                <input 
+                                  type="text" 
+                                  value={slide.title || ''}
+                                  onChange={e => updateSlide('title', e.target.value)}
+                                  className="w-full p-3 bg-white rounded-xl border outline-none focus:ring-2 focus:ring-primary" 
+                                  placeholder="Ex: Brilhe com Exclusividade"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                <label className="text-xs font-bold uppercase tracking-widest text-black/40 flex justify-between">
+                                  Descrição
+                                  <button 
+                                    type="button"
+                                    onClick={() => generateBannerDescription(idx, slide.title)}
+                                    disabled={isGeneratingAI}
+                                    className="text-primary hover:text-yellow-600 flex items-center gap-1 normal-case font-bold"
+                                  >
+                                    {isGeneratingAI ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                                    Gerar com IA
+                                  </button>
+                                </label>
+                                <textarea 
+                                  value={slide.description || ''}
+                                  onChange={e => updateSlide('description', e.target.value)}
+                                  className="w-full p-3 bg-white rounded-xl border outline-none focus:ring-2 focus:ring-primary h-20" 
+                                  placeholder="Ex: Nova Coleção 2026"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <label className="text-xs font-bold uppercase tracking-widest text-black/40">Imagem do Banner (Upload Obrigatório)</label>
+                              <div className="flex flex-col gap-4">
+                                {slide.image ? (
+                                  <div className="relative w-full h-40 rounded-xl overflow-hidden bg-white border-2 border-dashed border-neutral-200 group">
+                                    <img src={slide.image} alt={`Slide ${idx + 1}`} className="w-full h-full object-cover" />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                                      <label className="cursor-pointer bg-white text-black p-3 rounded-full hover:bg-primary transition-all">
+                                        <Upload size={20} />
+                                        <input type="file" className="hidden" accept="image/*" onChange={e => handleSettingsImageUpload(e, 'banner_image', idx)} />
+                                      </label>
+                                      <button 
+                                        type="button"
+                                        onClick={() => updateSlide('image', '')}
+                                        className="p-3 bg-red-500 text-white rounded-full hover:bg-red-600 transition-all"
+                                      >
+                                        <Trash2 size={20} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <label className="w-full h-40 rounded-xl border-2 border-dashed border-neutral-300 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-primary hover:bg-primary/5 transition-all">
+                                    {isUploadingSettingsImage === `banner_image_${idx}` ? (
+                                      <Loader2 size={32} className="animate-spin text-primary" />
+                                    ) : (
+                                      <>
+                                        <div className="w-12 h-12 bg-neutral-100 rounded-full flex items-center justify-center text-neutral-400">
+                                          <Upload size={24} />
+                                        </div>
+                                        <span className="text-sm font-bold text-neutral-500">CLIQUE PARA UPLOAD</span>
+                                        <span className="text-[10px] text-neutral-400 uppercase tracking-widest">PNG, JPG ou WEBP</span>
+                                      </>
+                                    )}
+                                    <input type="file" className="hidden" accept="image/*" onChange={e => handleSettingsImageUpload(e, 'banner_image', idx)} />
+                                  </label>
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      )}
-                      <div className="flex items-center gap-4">
-                        <input 
-                          type="text" 
-                          value={settings.banner_image || ''}
-                          onChange={e => setSettings({...settings, banner_image: e.target.value})}
-                          className="flex-1 p-4 bg-neutral-100 rounded-xl outline-none focus:ring-2 focus:ring-primary" 
-                          placeholder="URL da imagem..."
-                        />
-                        <label className="cursor-pointer bg-black text-white p-4 rounded-xl hover:bg-primary hover:text-black transition-all flex items-center gap-2">
-                          {isUploadingSettingsImage === 'banner_image' ? <Loader2 size={20} className="animate-spin" /> : <Upload size={20} />}
-                          <span className="hidden sm:inline">UPLOAD</span>
-                          <input type="file" className="hidden" accept="image/*" onChange={e => handleSettingsImageUpload(e, 'banner_image')} />
-                        </label>
-                      </div>
-                    </div>
+                      );
+                    })}
                   </div>
                   
                   <h4 className="font-bold border-b pb-2 mt-4">Identidade</h4>
@@ -3507,6 +3633,28 @@ function AppContent() {
       unsubSettings();
     };
   }, []);
+
+  useEffect(() => {
+    if (settings?.logo_url) {
+      // Update Favicon
+      let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = settings.logo_url;
+
+      // Update Apple Touch Icon
+      let appleLink = document.querySelector("link[rel='apple-touch-icon']") as HTMLLinkElement;
+      if (!appleLink) {
+        appleLink = document.createElement('link');
+        appleLink.rel = 'apple-touch-icon';
+        document.head.appendChild(appleLink);
+      }
+      appleLink.href = settings.logo_url;
+    }
+  }, [settings?.logo_url]);
 
   const addToCart = (product: Product) => {
     setCart(prev => {
