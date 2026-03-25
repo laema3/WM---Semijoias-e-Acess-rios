@@ -422,15 +422,9 @@ const Home = ({ products, onAddToCart, settings }: { products: Product[], onAddT
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <h3 className="text-primary font-bold tracking-[0.3em] uppercase mb-6">
-              {slides[currentSlide]?.description || ('Nova Coleção ' + new Date().getFullYear())}
-            </h3>
-            <h1 className="text-5xl md:text-7xl font-serif font-bold text-white mb-8 leading-tight">
+            <h1 className="text-5xl md:text-7xl font-serif font-bold text-white leading-tight">
               {slides[currentSlide]?.title}
             </h1>
-            <Link to="/shop" className="bg-primary text-black font-bold px-10 py-4 rounded-full hover:bg-yellow-500 transition-all shadow-xl hover:shadow-primary/20 inline-block">
-              VER PRODUTOS
-            </Link>
           </motion.div>
         </div>
 
