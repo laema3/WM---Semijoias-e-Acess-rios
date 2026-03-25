@@ -13,7 +13,13 @@ import JSZip from 'jszip';
 import firebaseConfig from '../firebase-applet-config.json';
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const getAiInstance = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not set");
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 // --- Error Handling ---
 
@@ -963,6 +969,7 @@ const AdminDashboard = () => {
     
     setIsGeneratingAI(true);
     try {
+      const ai = getAiInstance();
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash",
         contents: `Crie uma frase curta e impactante de marketing (máximo 10 palavras) para um banner de uma loja de semijoias de luxo. O título do banner é "${title}". O tom deve ser elegante e sofisticado. Retorne apenas a frase.`,
